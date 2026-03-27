@@ -13,7 +13,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(arb_core
     src/bridge_exchange.cpp
     src/engine.cpp
+    src/http.cpp
     src/process.cpp
+    src/public_exchange.cpp
     src/strategy.cpp
 )
 
@@ -28,6 +30,9 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(arb_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
+find_library(CURL_LIB curl REQUIRED)
+target_link_libraries(arb_core PUBLIC ${CURL_LIB})
+
 add_executable(arb_demo
     src/main.cpp
 )
@@ -39,3 +44,9 @@ add_executable(arb_tests
 )
 
 target_link_libraries(arb_tests PRIVATE arb_core)
+
+add_executable(native_baseline
+    src/native_baseline.cpp
+)
+
+target_link_libraries(native_baseline PRIVATE arb_core)

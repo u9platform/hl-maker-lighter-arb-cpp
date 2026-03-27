@@ -16,12 +16,13 @@ The repository currently contains:
 - a small strategy state machine in [`include/arb/strategy.hpp`](./include/arb/strategy.hpp)
 - domain types in [`include/arb/types.hpp`](./include/arb/types.hpp)
 - exchange adapter interfaces in [`include/arb/exchange.hpp`](./include/arb/exchange.hpp)
+- native public market-data clients in [`include/arb/public_exchange.hpp`](./include/arb/public_exchange.hpp)
 - a bridge-backed execution engine in [`include/arb/engine.hpp`](./include/arb/engine.hpp)
 - a Python bridge to the real HL/Lighter clients in [`scripts/exchange_bridge.py`](./scripts/exchange_bridge.py)
 - a lightweight test binary in [`tests/test_strategy.cpp`](./tests/test_strategy.cpp)
 - a demo driver in [`src/main.cpp`](./src/main.cpp)
 
-This is the minimum executable scaffold for the new architecture. Exchange adapters, persistence, telemetry, and recovery flows will be added on top of this core.
+This is the minimum executable scaffold for the new architecture. Public market data no longer needs Python. Authenticated trading is still mid-migration.
 
 ## Build
 
@@ -34,6 +35,17 @@ cmake --build build
 If `cmake` is not installed, the project can still be compiled directly with `clang++` as long as the `include/` and `src/` files are passed together.
 
 ## Real Client Bridge
+
+Current native status:
+
+- native C++:
+  - HL public orderbook
+  - Lighter public orderbook
+- still using bridge during migration:
+  - HL authenticated trading
+  - Lighter authenticated trading
+
+The goal is to remove the bridge entirely. It remains only for signed trading calls while the native signing path is being ported.
 
 The C++ strategy core talks to real venues through a small Python bridge:
 
@@ -102,6 +114,12 @@ Use the baseline helper to measure bridge overhead before optimizing native inte
 ```
 
 The measurement plan is documented in [`docs/performance-baseline.md`](./docs/performance-baseline.md).
+
+Native public-market-data baseline:
+
+```bash
+./native_baseline 5
+```
 
 ## Architecture Notes
 

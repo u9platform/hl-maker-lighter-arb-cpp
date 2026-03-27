@@ -2,4 +2,5 @@ build/
 arb_demo
 .bridge-venv/
 arb_tests
+native_baseline
 .DS_Store
