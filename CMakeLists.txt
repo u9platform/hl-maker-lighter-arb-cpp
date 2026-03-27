@@ -11,6 +11,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(arb_core
+    src/bridge_exchange.cpp
+    src/engine.cpp
+    src/process.cpp
     src/strategy.cpp
 )
 
@@ -30,3 +33,9 @@ add_executable(arb_demo
 )
 
 target_link_libraries(arb_demo PRIVATE arb_core)
+
+add_executable(arb_tests
+    tests/test_strategy.cpp
+)
+
+target_link_libraries(arb_tests PRIVATE arb_core)

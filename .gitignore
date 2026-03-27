@@ -1,3 +1,5 @@
 build/
 arb_demo
+.bridge-venv/
+arb_tests
 .DS_Store

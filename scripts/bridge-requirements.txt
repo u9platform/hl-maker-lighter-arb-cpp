@@ -1,0 +1,5 @@
+aiohttp
+websockets
+lighter-sdk
+hyperliquid-python-sdk
+eth-account
