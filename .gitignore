@@ -3,4 +3,5 @@ arb_demo
 .bridge-venv/
 arb_tests
 native_baseline
+native_smoke
 .DS_Store

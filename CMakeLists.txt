@@ -11,10 +11,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(arb_core
-    src/bridge_exchange.cpp
+    src/crypto.cpp
     src/engine.cpp
     src/http.cpp
-    src/process.cpp
+    src/msgpack.cpp
+    src/native_trading.cpp
     src/public_exchange.cpp
     src/strategy.cpp
 )
@@ -31,7 +32,13 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 endif()
 
 find_library(CURL_LIB curl REQUIRED)
-target_link_libraries(arb_core PUBLIC ${CURL_LIB})
+find_library(DL_LIB dl)
+find_library(SECP256K1_LIB secp256k1 PATHS /opt/homebrew/lib REQUIRED)
+target_include_directories(arb_core PUBLIC /opt/homebrew/include)
+target_link_libraries(arb_core PUBLIC ${CURL_LIB} ${SECP256K1_LIB})
+if (DL_LIB)
+    target_link_libraries(arb_core PUBLIC ${DL_LIB})
+endif()
 
 add_executable(arb_demo
     src/main.cpp
@@ -50,3 +57,9 @@ add_executable(native_baseline
 )
 
 target_link_libraries(native_baseline PRIVATE arb_core)
+
+add_executable(native_smoke
+    src/native_smoke.cpp
+)
+
+target_link_libraries(native_smoke PRIVATE arb_core)

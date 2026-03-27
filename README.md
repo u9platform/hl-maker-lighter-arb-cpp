@@ -17,12 +17,12 @@ The repository currently contains:
 - domain types in [`include/arb/types.hpp`](./include/arb/types.hpp)
 - exchange adapter interfaces in [`include/arb/exchange.hpp`](./include/arb/exchange.hpp)
 - native public market-data clients in [`include/arb/public_exchange.hpp`](./include/arb/public_exchange.hpp)
-- a bridge-backed execution engine in [`include/arb/engine.hpp`](./include/arb/engine.hpp)
-- a Python bridge to the real HL/Lighter clients in [`scripts/exchange_bridge.py`](./scripts/exchange_bridge.py)
+- native trading clients in [`include/arb/native_trading.hpp`](./include/arb/native_trading.hpp)
+- a native execution engine in [`include/arb/engine.hpp`](./include/arb/engine.hpp)
 - a lightweight test binary in [`tests/test_strategy.cpp`](./tests/test_strategy.cpp)
 - a demo driver in [`src/main.cpp`](./src/main.cpp)
 
-This is the minimum executable scaffold for the new architecture. Public market data no longer needs Python. Authenticated trading is still mid-migration.
+This is now a pure C++ codebase. Runtime trading and market data no longer require Python.
 
 ## Build
 
@@ -34,60 +34,27 @@ cmake --build build
 
 If `cmake` is not installed, the project can still be compiled directly with `clang++` as long as the `include/` and `src/` files are passed together.
 
-## Real Client Bridge
+## Native Runtime
 
 Current native status:
 
 - native C++:
   - HL public orderbook
   - Lighter public orderbook
-- still using bridge during migration:
-  - HL authenticated trading
-  - Lighter authenticated trading
-
-The goal is to remove the bridge entirely. It remains only for signed trading calls while the native signing path is being ported.
-
-The C++ strategy core talks to real venues through a small Python bridge:
-
-- Hyperliquid:
-  - `orderbook`
+- HL signed trading:
   - `place-limit`
   - `cancel`
   - `reduce`
-- Lighter:
-  - `orderbook`
+- Lighter signed trading:
   - `place-ioc`
-
-The bridge intentionally reuses the proven Python clients from the older repository instead of re-implementing live trading logic twice.
-
-Set:
-
-```bash
-export LIGHTER_HL_ARB_SOURCE=/absolute/path/to/lighter-hl-arb
-```
 
 Optional live credentials:
 
 ```bash
 export HL_PRIVATE_KEY=...
-export HL_ACCOUNT_ADDRESS=...
 export LIGHTER_API_PRIVATE_KEY=...
 export LIGHTER_ACCOUNT_INDEX=0
 export LIGHTER_API_KEY_INDEX=0
-```
-
-Suggested local bridge environment:
-
-```bash
-python3 -m venv .bridge-venv
-./.bridge-venv/bin/pip install -r scripts/bridge-requirements.txt
-```
-
-Bridge smoke tests:
-
-```bash
-python3 scripts/exchange_bridge.py hl orderbook --coin HYPE
-python3 scripts/exchange_bridge.py lighter orderbook --market-id 24
 ```
 
 ## Tests
@@ -107,15 +74,9 @@ Run:
 
 ## Baseline
 
-Use the baseline helper to measure bridge overhead before optimizing native integrations:
-
-```bash
-./.bridge-venv/bin/python scripts/perf_baseline.py --samples 20 --python-bin ./.bridge-venv/bin/python
-```
-
 The measurement plan is documented in [`docs/performance-baseline.md`](./docs/performance-baseline.md).
 
-Native public-market-data baseline:
+C++ baseline:
 
 ```bash
 ./native_baseline 5
@@ -138,7 +99,7 @@ The intended production layering is:
 
 ## Next Steps
 
-- add exchange adapter interfaces for HL and Lighter
-- wire real fill callbacks into the strategy state machine
-- implement unwind and exit handling for open hedged positions
-- add deterministic unit tests around threshold transitions and hedge-failure safety
+- wire live fill callbacks into the strategy state machine
+- add websocket market-data clients for HL and Lighter
+- harden authenticated native trading with live integration tests
+- add deterministic tests for HL/Lighter native signing helpers
