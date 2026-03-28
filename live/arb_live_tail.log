@@ -1,0 +1,293 @@
+=== HL Maker / Lighter Taker Arb (C++) ===
+dry_run=false spread=2 cancel_band=0.5 pair_size=25 max_pos=100
+[main] starting market feed...
+[ws] connected to api.hyperliquid.xyz/ws
+[hl-ws] subscribed to l2Book:HYPE
+[main] starting fill feed for 0xa3fb9fed3fe24baaafcbe783409bedaeff28d0a7
+[ws] connected to mainnet.zklighter.elliot.ai/stream
+[main] waiting for WS connections...
+[main] all WS connected, entering strategy loop
+[lighter-ws] subscribed to order_book:24
+[risk] 05:17:14.075 KILL SWITCH: fill feed not subscribed
+[ws] connected to api.hyperliquid.xyz/ws
+[hl-fills] subscribed to userFills
+[risk] 05:17:14.175 kill switch reset (fill feed reconnected and subscribed)
+[engine] 05:17:14.663 placed hl maker oid=363551875494
+[engine] 05:17:16.605 cancelled hl maker oid=363551875494
+[engine] 05:17:16.605 perf cancel oid=363551875494 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=309.69 hl_resting_ms=1632.36
+[engine] 05:17:17.253 placed hl maker oid=363551895799
+[fill] 05:17:18.946 HYPE px=38.318 sz=0.65 SELL oid=363551895799
+[lighter-debug] tx_type=14 tx_info_raw={"AccountIndex":720226,"ApiKeyIndex":10,"MarketIndex":24,"ClientOrderIndex":1774675039106,"BaseAmount":65,"Price":373871,"IsAsk":0,"Type":0,"TimeInForce":0,"ReduceOnly":0,"TriggerPrice":0,"OrderExpiry
+[lighter-debug] response={"code":200,"message":"{\"ratelimit\": \"didn't use volume quota\"}","tx_hash":"5f1f160e11ce1f2d1e0a65487ea9ff86c8bf456d486f10eadcd6677444601e7f37fc68ca5b043795","predicted_execution_time_ms":1774675039461}
+[lighter-debug] fill NOT confirmed yet, pos=0.68 (attempt 1, waiting 494ms more)
+[lighter-debug] fill NOT confirmed yet, pos=0.68 (attempt 2, waiting 988ms more)
+[lighter-debug] fill NOT confirmed yet, pos=0.68 (attempt 3, waiting 1976ms more)
+[lighter-debug] ⚠️ fill UNCONFIRMED after 3 attempts, tx=5f1f160e11ce1f2d1e0a65487ea9ff86c8bf456d486f10eadcd6677444601e7f37fc68ca5b043795
+[engine] 05:17:23.756 HEDGE UNCONFIRMED: hl_px=38.318 sz=0.65 lt_tx=5f1f160e11ce1f2d1e0a65487ea9ff86c8bf456d486f10eadcd6677444601e7f37fc68ca5b043795 — UNWINDING HL POSITION
+[engine] 05:17:23.756 HL UNWIND OK sz=0.65 avg_px=38.315
+[engine] 05:17:23.756 perf trade oid=363551895799 hedge_status=unconfirmed hl_fill_rx_to_lt_send_ms=0.113286 lt_send_to_ack_ms=3849.13 hedge_total_ms=3849.24 hedge_fail_to_unwind_send_ms=0.005989 unwind_send_to_ack_ms=961.415
+[engine] 05:17:24.046 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.314@38.317. asset=159"}]}}}
+[fill] 05:17:24.086 HYPE px=38.315 sz=0.65 BUY oid=363551933920
+[engine] 05:17:27.643 cancel requested with no active oid
+[engine] 05:17:28.582 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.318@38.319. asset=159"}]}}}
+[engine] 05:17:28.992 cancel requested with no active oid
+[engine] 05:17:30.586 placed hl maker oid=363551959155
+[engine] 05:17:34.008 cancelled hl maker oid=363551959155
+[engine] 05:17:34.008 perf cancel oid=363551959155 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=316.276 hl_resting_ms=3105.75
+[engine] 05:17:34.625 placed hl maker oid=363551974507
+[engine] 05:17:35.418 cancelled hl maker oid=363551974507
+[engine] 05:17:35.418 perf cancel oid=363551974507 cancel_trigger_to_send_ms=0.000173 cancel_send_to_ack_ms=284.076 hl_resting_ms=509.267
+[engine] 05:17:35.953 placed hl maker oid=363551979576
+[engine] 05:17:41.176 cancelled hl maker oid=363551979576
+[engine] 05:17:41.176 perf cancel oid=363551979576 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=433.767 hl_resting_ms=4788.93
+[engine] 05:17:41.798 placed hl maker oid=363552002401
+[engine] 05:17:42.488 cancelled hl maker oid=363552002401
+[engine] 05:17:42.488 perf cancel oid=363552002401 cancel_trigger_to_send_ms=0.000148 cancel_send_to_ack_ms=449.543 hl_resting_ms=240.2
+[engine] 05:17:43.073 placed hl maker oid=363552009014
+[fill] 05:17:44.357 HYPE px=38.331 sz=0.65 SELL oid=363552009014
+[lighter-debug] tx_type=14 tx_info_raw={"AccountIndex":720226,"ApiKeyIndex":10,"MarketIndex":24,"ClientOrderIndex":1774675064471,"BaseAmount":65,"Price":383404,"IsAsk":0,"Type":0,"TimeInForce":0,"ReduceOnly":0,"TriggerPrice":0,"OrderExpiry
+[lighter-debug] response={"code":200,"message":"{\"ratelimit\": \"didn't use volume quota\"}","tx_hash":"4477c5e6fc1ee8821c8795fff1a7b628a878c1a9f258a8f8ea979db14f8b313687a4abb5465176f8","predicted_execution_time_ms":1774675064822}
+[lighter-debug] fill CONFIRMED: pos 0.68 -> 1.33 delta=0.65 (attempt 1)
+[engine] 05:17:45.099 TRADE COMPLETE: hl_px=38.331 sz=0.65 lt_confirmed_sz=0.65 lt_hedge tx=4477c5e6fc1ee8821c8795fff1a7b628a878c1a9f258a8f8ea979db14f8b313687a4abb5465176f8 spread=-7.41199
+[engine] 05:17:45.099 perf trade oid=363552009014 signal_to_hl_send_ms=0.000377 hl_send_to_ack_ms=413.696 hl_resting_ms=1283.47 hl_fill_rx_to_lt_send_ms=0.113335 lt_send_to_ack_ms=741.989 hedge_total_ms=742.103
+[engine] 05:17:45.480 placed hl maker oid=363552017455
+[engine] 05:17:46.591 cancelled hl maker oid=363552017455
+[engine] 05:17:46.591 perf cancel oid=363552017455 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=346.928 hl_resting_ms=763.442
+[engine] 05:17:48.802 placed hl maker oid=363552030901
+[engine] 05:17:52.472 cancelled hl maker oid=363552030901
+[engine] 05:17:52.472 perf cancel oid=363552030901 cancel_trigger_to_send_ms=0.00059 cancel_send_to_ack_ms=523.873 hl_resting_ms=3146.03
+[engine] 05:17:52.935 placed hl maker oid=363552099488
+[engine] 05:17:54.873 cancelled hl maker oid=363552099488
+[engine] 05:17:54.873 perf cancel oid=363552099488 cancel_trigger_to_send_ms=0.000599 cancel_send_to_ack_ms=433.11 hl_resting_ms=1504.16
+[telem] 05:17:54.896 ticks=500 trades=2 uptime=40s spread=0.35bps hl=38.31/38.31 lt=38.31/38.32 state=2 pos=-0.65 fills_ws=SUBSCRIBED
+[perf] 05:17:54.896 metric=hl_market_local_rx_to_bbo_update samples=1 mean=3028.000 max=3028.000 unit=ms sampled=1
+[perf] 05:17:54.896 metric=lighter_market_local_rx_to_bbo_update samples=8 mean=7493.375 max=8574.000 unit=ms sampled=1
+[perf] 05:17:54.896 metric=strategy_decision samples=15 mean=344.067 max=517.000 unit=ms sampled=1
+[perf] 05:17:54.896 metric=signal_to_hl_maker_send samples=12 mean=398.083 max=517.000 unit=ms
+[perf] 05:17:54.896 metric=hl_maker_send_to_ack samples=12 mean=424159603.000 max=995240654.000 unit=ms
+[perf] 05:17:54.896 metric=hl_maker_resting_lifetime samples=2 mean=1487911823.000 max=1692352093.000 unit=ms
+[perf] 05:17:54.896 metric=cancel_trigger_to_hl_cancel_send samples=8 mean=314.750 max=599.000 unit=ms
+[perf] 05:17:54.896 metric=hl_cancel_send_to_ack samples=8 mean=387157748.000 max=523873064.000 unit=ms
+[perf] 05:17:54.896 metric=hl_fill_local_rx_to_lighter_send samples=2 mean=113310.500 max=113335.000 unit=ms
+[perf] 05:17:54.896 metric=lighter_send_to_ack samples=2 mean=2295559769.500 max=3849130233.000 unit=ms
+[perf] 05:17:54.896 metric=maker_fill_to_taker_ack_total samples=2 mean=2295673080.000 max=3849243519.000 unit=ms
+[perf] 05:17:54.896 metric=hedge_failure_to_unwind_send samples=1 mean=5989.000 max=5989.000 unit=ms
+[perf] 05:17:54.896 metric=unwind_send_to_ack samples=1 mean=961415011.000 max=961415011.000 unit=ms
+[engine] 05:17:55.636 placed hl maker oid=363552121301
+[engine] 05:17:57.368 cancelled hl maker oid=363552121301
+[engine] 05:17:57.368 perf cancel oid=363552121301 cancel_trigger_to_send_ms=0.000295 cancel_send_to_ack_ms=476.662 hl_resting_ms=1254.92
+[engine] 05:17:57.783 placed hl maker oid=363552138361
+[engine] 05:17:58.627 cancelled hl maker oid=363552138361
+[engine] 05:17:58.627 perf cancel oid=363552138361 cancel_trigger_to_send_ms=0.000238 cancel_send_to_ack_ms=287.594 hl_resting_ms=556.346
+[engine] 05:18:00.057 placed hl maker oid=363552154448
+[engine] 05:18:01.003 cancelled hl maker oid=363552154448
+[engine] 05:18:01.003 perf cancel oid=363552154448 cancel_trigger_to_send_ms=0.000287 cancel_send_to_ack_ms=410.066 hl_resting_ms=536.534
+[engine] 05:18:01.401 placed hl maker oid=363552164833
+[engine] 05:18:03.210 cancelled hl maker oid=363552164833
+[engine] 05:18:03.210 perf cancel oid=363552164833 cancel_trigger_to_send_ms=0.00023 cancel_send_to_ack_ms=365.042 hl_resting_ms=1443.73
+[engine] 05:18:03.978 placed hl maker oid=363552186090
+[engine] 05:18:04.416 cancelled hl maker oid=363552186090
+[engine] 05:18:04.416 perf cancel oid=363552186090 cancel_trigger_to_send_ms=0.000147 cancel_send_to_ack_ms=337.448 hl_resting_ms=100.17
+[engine] 05:18:04.972 placed hl maker oid=363552191638
+[engine] 05:18:05.467 cancelled hl maker oid=363552191638
+[engine] 05:18:05.467 perf cancel oid=363552191638 cancel_trigger_to_send_ms=0.000263 cancel_send_to_ack_ms=477.679 hl_resting_ms=18.0971
+[engine] 05:18:06.474 placed hl maker oid=363552198586
+[engine] 05:18:06.791 cancelled hl maker oid=363552198586
+[engine] 05:18:06.791 perf cancel oid=363552198586 cancel_trigger_to_send_ms=0.000164 cancel_send_to_ack_ms=299.484 hl_resting_ms=17.7088
+[engine] 05:18:07.389 placed hl maker oid=363552203069
+[engine] 05:18:08.638 cancelled hl maker oid=363552203069
+[engine] 05:18:08.638 perf cancel oid=363552203069 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=397.509 hl_resting_ms=851.356
+[engine] 05:18:09.554 placed hl maker oid=363552220641
+[engine] 05:18:09.910 cancelled hl maker oid=363552220641
+[engine] 05:18:09.910 perf cancel oid=363552220641 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=313.79 hl_resting_ms=42.5804
+[engine] 05:18:10.469 placed hl maker oid=363552233336
+[engine] 05:18:13.446 cancelled hl maker oid=363552233336
+[engine] 05:18:13.446 perf cancel oid=363552233336 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=355.998 hl_resting_ms=2620.96
+[engine] 05:18:14.706 placed hl maker oid=363552266043
+[engine] 05:18:15.362 cancelled hl maker oid=363552266043
+[engine] 05:18:15.362 perf cancel oid=363552266043 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=628.648 hl_resting_ms=26.904
+[engine] 05:18:15.690 placed hl maker oid=363552275776
+[engine] 05:18:16.472 cancelled hl maker oid=363552275776
+[engine] 05:18:16.472 perf cancel oid=363552275776 cancel_trigger_to_send_ms=0.000255 cancel_send_to_ack_ms=484.92 hl_resting_ms=297.076
+[engine] 05:18:16.970 placed hl maker oid=363552287029
+[engine] 05:18:19.327 cancelled hl maker oid=363552287029
+[engine] 05:18:19.327 perf cancel oid=363552287029 cancel_trigger_to_send_ms=0.000238 cancel_send_to_ack_ms=436.452 hl_resting_ms=1920.09
+[engine] 05:18:20.521 placed hl maker oid=363552303388
+[engine] 05:18:22.922 cancelled hl maker oid=363552303388
+[engine] 05:18:22.922 perf cancel oid=363552303388 cancel_trigger_to_send_ms=0.000173 cancel_send_to_ack_ms=430.99 hl_resting_ms=1969.87
+[engine] 05:18:24.239 placed hl maker oid=363552325312
+[engine] 05:18:29.941 cancelled hl maker oid=363552325312
+[engine] 05:18:29.941 perf cancel oid=363552325312 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=297.461 hl_resting_ms=5405.06
+[engine] 05:18:31.024 placed hl maker oid=363552364769
+[engine] 05:18:33.958 cancelled hl maker oid=363552364769
+[engine] 05:18:33.958 perf cancel oid=363552364769 cancel_trigger_to_send_ms=0.000295 cancel_send_to_ack_ms=218.309 hl_resting_ms=2715.78
+[engine] 05:18:35.174 placed hl maker oid=363552386313
+[engine] 05:18:35.597 cancelled hl maker oid=363552386313
+[engine] 05:18:35.597 perf cancel oid=363552386313 cancel_trigger_to_send_ms=0.000501 cancel_send_to_ack_ms=322.634 hl_resting_ms=100.189
+[engine] 05:18:38.622 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.326@38.327. asset=159"}]}}}
+[engine] 05:18:38.633 cancel requested with no active oid
+[engine] 05:18:39.615 placed hl maker oid=363552406982
+[engine] 05:18:39.972 cancelled hl maker oid=363552406982
+[engine] 05:18:39.972 perf cancel oid=363552406982 cancel_trigger_to_send_ms=0.000262 cancel_send_to_ack_ms=329.649 hl_resting_ms=27.4696
+[engine] 05:18:40.766 placed hl maker oid=363552411614
+[engine] 05:18:41.493 cancelled hl maker oid=363552411614
+[engine] 05:18:41.493 perf cancel oid=363552411614 cancel_trigger_to_send_ms=0.000262 cancel_send_to_ack_ms=401.006 hl_resting_ms=325.848
+[telem] 05:18:43.342 ticks=1000 trades=2 uptime=89s spread=-0.14bps hl=38.33/38.33 lt=38.32/38.33 state=2 pos=-0.65 fills_ws=SUBSCRIBED
+[perf] 05:18:43.342 metric=hl_market_local_rx_to_bbo_update samples=1 mean=4816.000 max=4816.000 unit=ms sampled=1
+[perf] 05:18:43.342 metric=lighter_market_local_rx_to_bbo_update samples=6 mean=6345.167 max=7195.000 unit=ms sampled=1
+[perf] 05:18:43.342 metric=strategy_decision samples=16 mean=570.188 max=2428.000 unit=ms sampled=1
+[perf] 05:18:43.342 metric=signal_to_hl_maker_send samples=20 mean=391.050 max=673.000 unit=ms
+[perf] 05:18:43.342 metric=hl_maker_send_to_ack samples=20 mean=376269187.800 max=697049532.000 unit=ms
+[perf] 05:18:43.342 metric=cancel_trigger_to_hl_cancel_send samples=19 mean=255.579 max=501.000 unit=ms
+[perf] 05:18:43.342 metric=hl_cancel_send_to_ack samples=19 mean=382702202.211 max=628647651.000 unit=ms
+[engine] 05:18:43.990 placed hl maker oid=363552425167
+[engine] 05:18:44.386 cancelled hl maker oid=363552425167
+[engine] 05:18:44.386 perf cancel oid=363552425167 cancel_trigger_to_send_ms=0.000189 cancel_send_to_ack_ms=392.862 hl_resting_ms=3.1966
+[ws] read error: Connection reset by peer
+[hl-fills] disconnected: Connection reset by peer, will resubscribe on reconnect
+[risk] 05:18:44.531 KILL SWITCH: fill feed disconnect - Connection reset by peer
+[ws] reconnecting in 1000ms (attempt 1)
+[ws] connected to api.hyperliquid.xyz/ws
+[hl-fills] subscribed to userFills
+[risk] 05:18:45.587 kill switch reset (fill feed reconnected and subscribed)
+[engine] 05:18:45.970 placed hl maker oid=363552434158
+[engine] 05:18:47.001 cancelled hl maker oid=363552434158
+[engine] 05:18:47.001 perf cancel oid=363552434158 cancel_trigger_to_send_ms=0.000271 cancel_send_to_ack_ms=463.608 hl_resting_ms=567.437
+[engine] 05:18:48.681 placed hl maker oid=363552446332
+[engine] 05:18:49.260 cancelled hl maker oid=363552446332
+[engine] 05:18:49.260 perf cancel oid=363552446332 cancel_trigger_to_send_ms=0.000255 cancel_send_to_ack_ms=478.868 hl_resting_ms=100.183
+[engine] 05:18:49.700 placed hl maker oid=363552451400
+[engine] 05:18:50.269 cancelled hl maker oid=363552451400
+[engine] 05:18:50.269 perf cancel oid=363552451400 cancel_trigger_to_send_ms=0.000263 cancel_send_to_ack_ms=423.901 hl_resting_ms=145.005
+[engine] 05:18:50.999 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.34@38.341. asset=159"}]}}}
+[engine] 05:18:51.045 cancel requested with no active oid
+[engine] 05:18:52.047 placed hl maker oid=363552461294
+[engine] 05:18:52.642 cancelled hl maker oid=363552461294
+[engine] 05:18:52.642 perf cancel oid=363552461294 cancel_trigger_to_send_ms=0.000229 cancel_send_to_ack_ms=349.921 hl_resting_ms=245.526
+[engine] 05:18:53.718 placed hl maker oid=363552469927
+[fill] 05:18:53.790 HYPE px=38.34 sz=0.65 SELL oid=363552469927
+[lighter-debug] tx_type=14 tx_info_raw={"AccountIndex":720226,"ApiKeyIndex":10,"MarketIndex":24,"ClientOrderIndex":1774675133901,"BaseAmount":65,"Price":383666,"IsAsk":0,"Type":0,"TimeInForce":0,"ReduceOnly":0,"TriggerPrice":0,"OrderExpiry
+[lighter-debug] response={"code":200,"message":"{\"ratelimit\": \"didn't use volume quota\"}","tx_hash":"9c8bac5951af2953ea8c56803024f5f8f701c2f7de9d092ce75f1acf961ab386da054496970e38be","predicted_execution_time_ms":1774675134251}
+[lighter-debug] fill CONFIRMED: pos 1.33 -> 1.98 delta=0.65 (attempt 1)
+[engine] 05:18:54.517 TRADE COMPLETE: hl_px=38.341 sz=0.65 lt_confirmed_sz=0.65 lt_hedge tx=9c8bac5951af2953ea8c56803024f5f8f701c2f7de9d092ce75f1acf961ab386da054496970e38be spread=-3.19557
+[engine] 05:18:54.517 perf trade oid=363552469927 signal_to_hl_send_ms=0.000385 hl_send_to_ack_ms=424.147 hl_resting_ms=71.9892 hl_fill_rx_to_lt_send_ms=0.125734 lt_send_to_ack_ms=726.742 hedge_total_ms=726.867
+[engine] 05:18:54.782 placed hl maker oid=363552474641
+[engine] 05:18:58.507 cancelled hl maker oid=363552474641
+[engine] 05:18:58.507 perf cancel oid=363552474641 cancel_trigger_to_send_ms=0.000279 cancel_send_to_ack_ms=416.601 hl_resting_ms=3308.5
+[engine] 05:18:59.105 placed hl maker oid=363552493247
+[engine] 05:19:00.349 cancelled hl maker oid=363552493247
+[engine] 05:19:00.349 perf cancel oid=363552493247 cancel_trigger_to_send_ms=0.000262 cancel_send_to_ack_ms=303.457 hl_resting_ms=940.185
+[engine] 05:19:01.108 placed hl maker oid=363552508303
+[engine] 05:19:02.433 cancelled hl maker oid=363552508303
+[engine] 05:19:02.433 perf cancel oid=363552508303 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=192.106 hl_resting_ms=1133.47
+[fill] 05:19:02.446 HYPE px=38.34 sz=0.65 SELL oid=363552508303
+[lighter-debug] tx_type=14 tx_info_raw={"AccountIndex":720226,"ApiKeyIndex":10,"MarketIndex":24,"ClientOrderIndex":1774675142555,"BaseAmount":65,"Price":383742,"IsAsk":0,"Type":0,"TimeInForce":0,"ReduceOnly":0,"TriggerPrice":0,"OrderExpiry
+[lighter-debug] response={"code":200,"message":"{\"ratelimit\": \"didn't use volume quota\"}","tx_hash":"d174c69f27be4492a5e538063d6189f9e4ed3387679a4f9c95f0c23403b35c0e48ff64c1d0651f5b","predicted_execution_time_ms":1774675142905}
+[lighter-debug] fill CONFIRMED: pos 1.98 -> 2.63 delta=0.65 (attempt 1)
+[engine] 05:19:03.166 TRADE COMPLETE: hl_px=38.341 sz=0.65 lt_confirmed_sz=0.65 lt_hedge tx=d174c69f27be4492a5e538063d6189f9e4ed3387679a4f9c95f0c23403b35c0e48ff64c1d0651f5b spread=0.104341
+[engine] 05:19:03.166 perf trade oid=363552508303 signal_to_hl_send_ms=0.000402 hl_send_to_ack_ms=517.163 hl_resting_ms=1235.56 hl_fill_rx_to_lt_send_ms=102.848 lt_send_to_ack_ms=719.462 hedge_total_ms=822.31
+[engine] 05:19:03.856 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.342@38.343. asset=159"}]}}}
+[engine] 05:19:03.888 cancel requested with no active oid
+[engine] 05:19:04.851 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.343@38.344. asset=159"}]}}}
+[engine] 05:19:05.091 cancel requested with no active oid
+[engine] 05:19:06.253 placed hl maker oid=363552547114
+[engine] 05:19:06.780 cancelled hl maker oid=363552547114
+[engine] 05:19:06.780 perf cancel oid=363552547114 cancel_trigger_to_send_ms=0.00023 cancel_send_to_ack_ms=389.822 hl_resting_ms=136.88
+[engine] 05:19:07.367 placed hl maker oid=363552554935
+[engine] 05:19:07.900 cancelled hl maker oid=363552554935
+[engine] 05:19:07.900 perf cancel oid=363552554935 cancel_trigger_to_send_ms=0.000238 cancel_send_to_ack_ms=359.004 hl_resting_ms=173.881
+[engine] 05:19:08.470 placed hl maker oid=363552560732
+[engine] 05:19:09.910 cancelled hl maker oid=363552560732
+[engine] 05:19:09.910 perf cancel oid=363552560732 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=263.488 hl_resting_ms=1175.77
+[engine] 05:19:10.492 placed hl maker oid=363552572431
+[fill] 05:19:10.524 HYPE px=38.34 sz=0.65 SELL oid=363552572431
+[lighter-debug] tx_type=14 tx_info_raw={"AccountIndex":720226,"ApiKeyIndex":10,"MarketIndex":24,"ClientOrderIndex":1774675150633,"BaseAmount":65,"Price":383716,"IsAsk":0,"Type":0,"TimeInForce":0,"ReduceOnly":0,"TriggerPrice":0,"OrderExpiry
+[lighter-debug] response={"code":200,"message":"{\"ratelimit\": \"didn't use volume quota\"}","tx_hash":"15e048f5c74fac890084e2ca456d1f3400f64b75904fad74934490399357b151099d7c81a38f8e91","predicted_execution_time_ms":1774675151000}
+[lighter-debug] fill CONFIRMED: pos 2.63 -> 3.28 delta=0.65 (attempt 1)
+[engine] 05:19:11.258 TRADE COMPLETE: hl_px=38.344 sz=0.65 lt_confirmed_sz=0.65 lt_hedge tx=15e048f5c74fac890084e2ca456d1f3400f64b75904fad74934490399357b151099d7c81a38f8e91 spread=-2.67356
+[engine] 05:19:11.258 perf trade oid=363552572431 signal_to_hl_send_ms=0.000426 hl_send_to_ack_ms=297.148 hl_resting_ms=32.449 hl_fill_rx_to_lt_send_ms=0.102956 lt_send_to_ack_ms=733.2 hedge_total_ms=733.303
+[engine] 05:19:12.139 placed hl maker oid=363552580273
+[engine] 05:19:12.438 cancelled hl maker oid=363552580273
+[engine] 05:19:12.438 perf cancel oid=363552580273 cancel_trigger_to_send_ms=0.000181 cancel_send_to_ack_ms=297.419 hl_resting_ms=1.53773
+[engine] 05:19:13.154 placed hl maker oid=363552584690
+[engine] 05:19:15.130 cancelled hl maker oid=363552584690
+[engine] 05:19:15.130 perf cancel oid=363552584690 cancel_trigger_to_send_ms=0.000229 cancel_send_to_ack_ms=292.527 hl_resting_ms=1683.47
+[engine] 05:19:15.632 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:19:16.242 cancel requested with no active oid
+[engine] 05:19:18.058 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:19:18.489 cancel requested with no active oid
+[engine] 05:19:22.677 placed hl maker oid=363552658148
+[engine] 05:19:23.083 cancelled hl maker oid=363552658148
+[engine] 05:19:23.083 perf cancel oid=363552658148 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=305.863 hl_resting_ms=100.177
+[engine] 05:19:23.684 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:19:24.986 cancel requested with no active oid
+[engine] 05:19:26.188 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.343@38.344. asset=159"}]}}}
+[engine] 05:19:26.288 cancel requested with no active oid
+[engine] 05:19:27.113 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[telem] 05:19:30.386 ticks=1500 trades=5 uptime=136s spread=-4.12bps hl=38.34/38.34 lt=38.31/38.34 state=1 pos=-2.60 fills_ws=SUBSCRIBED
+[perf] 05:19:30.386 metric=hl_market_local_rx_to_bbo_update samples=1 mean=4931.000 max=4931.000 unit=ms sampled=1
+[perf] 05:19:30.386 metric=lighter_market_local_rx_to_bbo_update samples=8 mean=6599.000 max=7467.000 unit=ms sampled=1
+[perf] 05:19:30.386 metric=strategy_decision samples=15 mean=336.333 max=640.000 unit=ms sampled=1
+[perf] 05:19:30.386 metric=signal_to_hl_maker_send samples=24 mean=389.250 max=779.000 unit=ms
+[perf] 05:19:30.386 metric=hl_maker_send_to_ack samples=24 mean=409797739.250 max=656726787.000 unit=ms
+[perf] 05:19:30.386 metric=hl_maker_resting_lifetime samples=3 mean=446664490.000 max=1235555273.000 unit=ms
+[perf] 05:19:30.386 metric=cancel_trigger_to_hl_cancel_send samples=14 mean=240.857 max=279.000 unit=ms
+[perf] 05:19:30.386 metric=hl_cancel_send_to_ack samples=14 mean=352103229.429 max=478867550.000 unit=ms
+[perf] 05:19:30.386 metric=hl_fill_local_rx_to_lighter_send samples=3 mean=34358826.333 max=102847789.000 unit=ms
+[perf] 05:19:30.386 metric=lighter_send_to_ack samples=3 mean=726468000.333 max=733200231.000 unit=ms
+[perf] 05:19:30.386 metric=maker_fill_to_taker_ack_total samples=3 mean=760826826.667 max=822310050.000 unit=ms
+[engine] 05:19:31.090 cancel requested with no active oid
+[engine] 05:19:32.886 placed hl maker oid=363552722302
+[engine] 05:19:33.251 cancelled hl maker oid=363552722302
+[engine] 05:19:33.251 perf cancel oid=363552722302 cancel_trigger_to_send_ms=0.000262 cancel_send_to_ack_ms=357.904 hl_resting_ms=7.57748
+[engine] 05:19:33.703 placed hl maker oid=363552727160
+[engine] 05:19:34.460 cancelled hl maker oid=363552727160
+[engine] 05:19:34.460 perf cancel oid=363552727160 cancel_trigger_to_send_ms=0.000106 cancel_send_to_ack_ms=420.566 hl_resting_ms=335.915
+[engine] 05:19:35.251 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:19:35.291 cancel requested with no active oid
+[engine] 05:19:37.467 placed hl maker oid=363552746477
+[engine] 05:19:37.989 cancelled hl maker oid=363552746477
+[engine] 05:19:37.989 perf cancel oid=363552746477 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=248.307 hl_resting_ms=274.423
+[engine] 05:19:38.589 placed hl maker oid=363552752680
+[engine] 05:19:39.555 cancelled hl maker oid=363552752680
+[engine] 05:19:39.555 perf cancel oid=363552752680 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=364.487 hl_resting_ms=601.177
+[engine] 05:19:40.202 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:19:41.142 cancel requested with no active oid
+[engine] 05:19:42.107 placed hl maker oid=363552770577
+[engine] 05:19:42.498 cancelled hl maker oid=363552770577
+[engine] 05:19:42.499 perf cancel oid=363552770577 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=309.284 hl_resting_ms=81.7461
+[engine] 05:19:44.150 placed hl maker oid=363552792961
+[engine] 05:19:44.538 cancelled hl maker oid=363552792961
+[engine] 05:19:44.538 perf cancel oid=363552792961 cancel_trigger_to_send_ms=0.000255 cancel_send_to_ack_ms=345.561 hl_resting_ms=42.5634
+[engine] 05:19:45.935 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:19:46.995 cancel requested with no active oid
+[engine] 05:19:48.210 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:19:48.844 cancel requested with no active oid
+[engine] 05:19:49.669 placed hl maker oid=363552840642
+[engine] 05:19:50.770 cancelled hl maker oid=363552840642
+[engine] 05:19:50.770 perf cancel oid=363552840642 cancel_trigger_to_send_ms=0.00023 cancel_send_to_ack_ms=375.597 hl_resting_ms=725.55
+[engine] 05:19:51.474 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:19:52.490 cancel requested with no active oid
+[engine] 05:19:53.949 placed hl maker oid=363552872162
+[engine] 05:19:55.099 cancelled hl maker oid=363552872162
+[engine] 05:19:55.099 perf cancel oid=363552872162 cancel_trigger_to_send_ms=0.000263 cancel_send_to_ack_ms=258.994 hl_resting_ms=890.475
+[engine] 05:19:55.709 placed hl maker oid=363552886030
+[engine] 05:19:56.973 cancelled hl maker oid=363552886030
+[engine] 05:19:56.973 perf cancel oid=363552886030 cancel_trigger_to_send_ms=0.000238 cancel_send_to_ack_ms=582.61 hl_resting_ms=681.89
+[engine] 05:19:57.603 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:19:58.239 cancel requested with no active oid
+[engine] 05:19:59.133 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.337@38.34. asset=159"}]}}}
+[engine] 05:20:00.391 cancel requested with no active oid
+[engine] 05:20:01.903 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:20:02.285 cancel requested with no active oid
+[engine] 05:20:03.103 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:20:03.747 cancel requested with no active oid
+[engine] 05:20:04.873 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.34@38.341. asset=159"}]}}}
+[engine] 05:20:04.892 cancel requested with no active oid
+[engine] 05:20:06.059 placed hl maker oid=363553055204
+[engine] 05:20:06.987 cancelled hl maker oid=363553055204
+[engine] 05:20:06.987 perf cancel oid=363553055204 cancel_trigger_to_send_ms=0.000263 cancel_send_to_ack_ms=689.215 hl_resting_ms=238.904
+[engine] 05:20:07.258 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:20:07.790 cancel requested with no active oid
+[engine] 05:20:08.636 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.34@38.341. asset=159"}]}}}
+[engine] 05:20:09.038 cancel requested with no active oid

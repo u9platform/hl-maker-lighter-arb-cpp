@@ -1,19 +1,29 @@
 #include "arb/engine.hpp"
 #include "arb/perf.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <sstream>
 
 namespace arb {
 
+namespace {
+std::int64_t now_us() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+}  // namespace
+
 MakerHedgeEngine::MakerHedgeEngine(
     EngineConfig config,
     HyperliquidExchange& hl,
-    LighterExchange& lighter
+    LighterExchange& lighter,
+    TradeJournal* journal
 ) : config_(std::move(config)),
     hl_(hl),
     lighter_(lighter),
-    strategy_(config_.strategy) {}
+    strategy_(config_.strategy),
+    journal_(journal) {}
 
 SpreadSnapshot MakerHedgeEngine::collect_snapshot() const {
     const Bbo hl_bbo = hl_.get_bbo(config_.hl_coin);
@@ -140,6 +150,20 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
                  << " hl_fill_rx_to_lt_send_ms=" << static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0
                  << " lt_send_to_ack_ms=" << static_cast<double>(lighter_ack_ns - lighter_send_ns) / 1000000.0
                  << " hedge_total_ms=" << static_cast<double>(lighter_ack_ns - fill_rx_ns) / 1000000.0;
+        if (journal_) {
+            journal_->record(JournalEntry {
+                .timestamp_us = now_us(),
+                .type = 'T',
+                .hl_side = hl_is_buy ? 'B' : 'S',
+                .hl_px = fill_price,
+                .hl_sz = fill_size_base,
+                .lt_px = hedge_price,
+                .lt_sz = ack.confirmed_size,
+                .spread_bps = snapshot.cross_spread_bps,
+                .hl_oid = oid,
+                .lt_tx = ack.tx_hash,
+            });
+        }
     } else if (ack.ok && !ack.fill_confirmed) {
         msg << "HEDGE UNCONFIRMED: hl_px=" << fill_price << " sz=" << fill_size_base
             << " lt_tx=" << ack.tx_hash << " — UNWINDING HL POSITION";
@@ -170,6 +194,20 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
                     << " hedge_fail_to_unwind_send_ms=" << static_cast<double>(unwind_send_ns - lighter_ack_ns) / 1000000.0
                     << " unwind_send_to_ack_ms=" << static_cast<double>(unwind_ack_ns - unwind_send_ns) / 1000000.0;
         events.push_back(EventLog {.message = unwind_perf.str()});
+        if (journal_) {
+            journal_->record(JournalEntry {
+                .timestamp_us = now_us(),
+                .type = 'U',
+                .hl_side = is_ask ? 'S' : 'B',
+                .hl_px = fill_price,
+                .hl_sz = fill_size_base,
+                .lt_px = 0.0,
+                .lt_sz = 0.0,
+                .spread_bps = snapshot.cross_spread_bps,
+                .hl_oid = oid,
+                .lt_tx = ack.tx_hash,
+            });
+        }
         strategy_.reset();
         active_hl_oid_.reset();
         perf_trace_ = {};
@@ -204,6 +242,20 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
                     << " hedge_fail_to_unwind_send_ms=" << static_cast<double>(unwind_send_ns - lighter_ack_ns) / 1000000.0
                     << " unwind_send_to_ack_ms=" << static_cast<double>(unwind_ack_ns - unwind_send_ns) / 1000000.0;
         events.push_back(EventLog {.message = unwind_perf.str()});
+        if (journal_) {
+            journal_->record(JournalEntry {
+                .timestamp_us = now_us(),
+                .type = 'F',
+                .hl_side = is_ask ? 'S' : 'B',
+                .hl_px = fill_price,
+                .hl_sz = fill_size_base,
+                .lt_px = 0.0,
+                .lt_sz = 0.0,
+                .spread_bps = snapshot.cross_spread_bps,
+                .hl_oid = oid,
+                .lt_tx = "",
+            });
+        }
         strategy_.reset();
         active_hl_oid_.reset();
         perf_trace_ = {};

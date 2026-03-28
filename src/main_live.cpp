@@ -1,4 +1,5 @@
 #include "arb/engine.hpp"
+#include "arb/journal.hpp"
 #include "arb/market_feed.hpp"
 #include "arb/native_trading.hpp"
 #include "arb/perf.hpp"
@@ -9,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <fstream>
 #include <csignal>
 #include <cstdlib>
 #include <iomanip>
@@ -144,7 +146,19 @@ int main() {
     engine_config.lighter_market_id = 24;
     engine_config.dry_run = dry_run;
 
-    arb::MakerHedgeEngine engine(engine_config, hl_exchange, lighter_exchange);
+    // --- Trade Journal (append-only CSV, flushed with telemetry) ---
+    const std::string journal_path = env_or("JOURNAL_PATH", "/home/ubuntu/lighter-hl-arb-cpp/trades.csv");
+    arb::TradeJournal journal(journal_path);
+    // Write header if file is new
+    {
+        std::ifstream probe(journal_path);
+        if (!probe.good() || probe.peek() == std::ifstream::traits_type::eof()) {
+            std::ofstream hdr(journal_path);
+            hdr << "timestamp_us,type,hl_side,hl_px,hl_sz,lt_px,lt_sz,spread_bps,hl_oid,lt_tx\n";
+        }
+    }
+
+    arb::MakerHedgeEngine engine(engine_config, hl_exchange, lighter_exchange, &journal);
 
     // --- Risk ---
     arb::RiskGuard risk({
@@ -296,8 +310,9 @@ int main() {
             std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
         }
 
-        // Telemetry every 500 ticks.
+        // Flush journal + telemetry every 500 ticks.
         if (tick_count - last_log_tick >= 500) {
+            journal.flush();
             last_log_tick = tick_count.load();
             const auto uptime_s = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - start_time).count();
@@ -325,6 +340,7 @@ int main() {
 
     // --- Shutdown ---
     std::cerr << "\n[main] shutting down...\n";
+    journal.flush();
     feed.stop();
     if (fill_feed) fill_feed->stop();
 

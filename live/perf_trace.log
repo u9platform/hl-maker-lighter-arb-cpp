@@ -1,0 +1,56 @@
+[engine] 05:17:16.605 perf cancel oid=363551875494 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=309.69 hl_resting_ms=1632.36
+[engine] 05:17:23.756 perf trade oid=363551895799 hedge_status=unconfirmed hl_fill_rx_to_lt_send_ms=0.113286 lt_send_to_ack_ms=3849.13 hedge_total_ms=3849.24 hedge_fail_to_unwind_send_ms=0.005989 unwind_send_to_ack_ms=961.415
+[engine] 05:17:34.008 perf cancel oid=363551959155 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=316.276 hl_resting_ms=3105.75
+[engine] 05:17:35.418 perf cancel oid=363551974507 cancel_trigger_to_send_ms=0.000173 cancel_send_to_ack_ms=284.076 hl_resting_ms=509.267
+[engine] 05:17:41.176 perf cancel oid=363551979576 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=433.767 hl_resting_ms=4788.93
+[engine] 05:17:42.488 perf cancel oid=363552002401 cancel_trigger_to_send_ms=0.000148 cancel_send_to_ack_ms=449.543 hl_resting_ms=240.2
+[engine] 05:17:45.099 perf trade oid=363552009014 signal_to_hl_send_ms=0.000377 hl_send_to_ack_ms=413.696 hl_resting_ms=1283.47 hl_fill_rx_to_lt_send_ms=0.113335 lt_send_to_ack_ms=741.989 hedge_total_ms=742.103
+[engine] 05:17:46.591 perf cancel oid=363552017455 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=346.928 hl_resting_ms=763.442
+[engine] 05:17:52.472 perf cancel oid=363552030901 cancel_trigger_to_send_ms=0.00059 cancel_send_to_ack_ms=523.873 hl_resting_ms=3146.03
+[engine] 05:17:54.873 perf cancel oid=363552099488 cancel_trigger_to_send_ms=0.000599 cancel_send_to_ack_ms=433.11 hl_resting_ms=1504.16
+[engine] 05:17:57.368 perf cancel oid=363552121301 cancel_trigger_to_send_ms=0.000295 cancel_send_to_ack_ms=476.662 hl_resting_ms=1254.92
+[engine] 05:17:58.627 perf cancel oid=363552138361 cancel_trigger_to_send_ms=0.000238 cancel_send_to_ack_ms=287.594 hl_resting_ms=556.346
+[engine] 05:18:01.003 perf cancel oid=363552154448 cancel_trigger_to_send_ms=0.000287 cancel_send_to_ack_ms=410.066 hl_resting_ms=536.534
+[engine] 05:18:03.210 perf cancel oid=363552164833 cancel_trigger_to_send_ms=0.00023 cancel_send_to_ack_ms=365.042 hl_resting_ms=1443.73
+[engine] 05:18:04.416 perf cancel oid=363552186090 cancel_trigger_to_send_ms=0.000147 cancel_send_to_ack_ms=337.448 hl_resting_ms=100.17
+[engine] 05:18:05.467 perf cancel oid=363552191638 cancel_trigger_to_send_ms=0.000263 cancel_send_to_ack_ms=477.679 hl_resting_ms=18.0971
+[engine] 05:18:06.791 perf cancel oid=363552198586 cancel_trigger_to_send_ms=0.000164 cancel_send_to_ack_ms=299.484 hl_resting_ms=17.7088
+[engine] 05:18:08.638 perf cancel oid=363552203069 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=397.509 hl_resting_ms=851.356
+[engine] 05:18:09.910 perf cancel oid=363552220641 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=313.79 hl_resting_ms=42.5804
+[engine] 05:18:13.446 perf cancel oid=363552233336 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=355.998 hl_resting_ms=2620.96
+[engine] 05:18:15.362 perf cancel oid=363552266043 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=628.648 hl_resting_ms=26.904
+[engine] 05:18:16.472 perf cancel oid=363552275776 cancel_trigger_to_send_ms=0.000255 cancel_send_to_ack_ms=484.92 hl_resting_ms=297.076
+[engine] 05:18:19.327 perf cancel oid=363552287029 cancel_trigger_to_send_ms=0.000238 cancel_send_to_ack_ms=436.452 hl_resting_ms=1920.09
+[engine] 05:18:22.922 perf cancel oid=363552303388 cancel_trigger_to_send_ms=0.000173 cancel_send_to_ack_ms=430.99 hl_resting_ms=1969.87
+[engine] 05:18:29.941 perf cancel oid=363552325312 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=297.461 hl_resting_ms=5405.06
+[engine] 05:18:33.958 perf cancel oid=363552364769 cancel_trigger_to_send_ms=0.000295 cancel_send_to_ack_ms=218.309 hl_resting_ms=2715.78
+[engine] 05:18:35.597 perf cancel oid=363552386313 cancel_trigger_to_send_ms=0.000501 cancel_send_to_ack_ms=322.634 hl_resting_ms=100.189
+[engine] 05:18:39.972 perf cancel oid=363552406982 cancel_trigger_to_send_ms=0.000262 cancel_send_to_ack_ms=329.649 hl_resting_ms=27.4696
+[engine] 05:18:41.493 perf cancel oid=363552411614 cancel_trigger_to_send_ms=0.000262 cancel_send_to_ack_ms=401.006 hl_resting_ms=325.848
+[engine] 05:18:44.386 perf cancel oid=363552425167 cancel_trigger_to_send_ms=0.000189 cancel_send_to_ack_ms=392.862 hl_resting_ms=3.1966
+[engine] 05:18:47.001 perf cancel oid=363552434158 cancel_trigger_to_send_ms=0.000271 cancel_send_to_ack_ms=463.608 hl_resting_ms=567.437
+[engine] 05:18:49.260 perf cancel oid=363552446332 cancel_trigger_to_send_ms=0.000255 cancel_send_to_ack_ms=478.868 hl_resting_ms=100.183
+[engine] 05:18:50.269 perf cancel oid=363552451400 cancel_trigger_to_send_ms=0.000263 cancel_send_to_ack_ms=423.901 hl_resting_ms=145.005
+[engine] 05:18:52.642 perf cancel oid=363552461294 cancel_trigger_to_send_ms=0.000229 cancel_send_to_ack_ms=349.921 hl_resting_ms=245.526
+[engine] 05:18:54.517 perf trade oid=363552469927 signal_to_hl_send_ms=0.000385 hl_send_to_ack_ms=424.147 hl_resting_ms=71.9892 hl_fill_rx_to_lt_send_ms=0.125734 lt_send_to_ack_ms=726.742 hedge_total_ms=726.867
+[engine] 05:18:58.507 perf cancel oid=363552474641 cancel_trigger_to_send_ms=0.000279 cancel_send_to_ack_ms=416.601 hl_resting_ms=3308.5
+[engine] 05:19:00.349 perf cancel oid=363552493247 cancel_trigger_to_send_ms=0.000262 cancel_send_to_ack_ms=303.457 hl_resting_ms=940.185
+[engine] 05:19:02.433 perf cancel oid=363552508303 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=192.106 hl_resting_ms=1133.47
+[engine] 05:19:03.166 perf trade oid=363552508303 signal_to_hl_send_ms=0.000402 hl_send_to_ack_ms=517.163 hl_resting_ms=1235.56 hl_fill_rx_to_lt_send_ms=102.848 lt_send_to_ack_ms=719.462 hedge_total_ms=822.31
+[engine] 05:19:06.780 perf cancel oid=363552547114 cancel_trigger_to_send_ms=0.00023 cancel_send_to_ack_ms=389.822 hl_resting_ms=136.88
+[engine] 05:19:07.900 perf cancel oid=363552554935 cancel_trigger_to_send_ms=0.000238 cancel_send_to_ack_ms=359.004 hl_resting_ms=173.881
+[engine] 05:19:09.910 perf cancel oid=363552560732 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=263.488 hl_resting_ms=1175.77
+[engine] 05:19:11.258 perf trade oid=363552572431 signal_to_hl_send_ms=0.000426 hl_send_to_ack_ms=297.148 hl_resting_ms=32.449 hl_fill_rx_to_lt_send_ms=0.102956 lt_send_to_ack_ms=733.2 hedge_total_ms=733.303
+[engine] 05:19:12.438 perf cancel oid=363552580273 cancel_trigger_to_send_ms=0.000181 cancel_send_to_ack_ms=297.419 hl_resting_ms=1.53773
+[engine] 05:19:15.130 perf cancel oid=363552584690 cancel_trigger_to_send_ms=0.000229 cancel_send_to_ack_ms=292.527 hl_resting_ms=1683.47
+[engine] 05:19:23.083 perf cancel oid=363552658148 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=305.863 hl_resting_ms=100.177
+[engine] 05:19:33.251 perf cancel oid=363552722302 cancel_trigger_to_send_ms=0.000262 cancel_send_to_ack_ms=357.904 hl_resting_ms=7.57748
+[engine] 05:19:34.460 perf cancel oid=363552727160 cancel_trigger_to_send_ms=0.000106 cancel_send_to_ack_ms=420.566 hl_resting_ms=335.915
+[engine] 05:19:37.989 perf cancel oid=363552746477 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=248.307 hl_resting_ms=274.423
+[engine] 05:19:39.555 perf cancel oid=363552752680 cancel_trigger_to_send_ms=0.000254 cancel_send_to_ack_ms=364.487 hl_resting_ms=601.177
+[engine] 05:19:42.499 perf cancel oid=363552770577 cancel_trigger_to_send_ms=0.000246 cancel_send_to_ack_ms=309.284 hl_resting_ms=81.7461
+[engine] 05:19:44.538 perf cancel oid=363552792961 cancel_trigger_to_send_ms=0.000255 cancel_send_to_ack_ms=345.561 hl_resting_ms=42.5634
+[engine] 05:19:50.770 perf cancel oid=363552840642 cancel_trigger_to_send_ms=0.00023 cancel_send_to_ack_ms=375.597 hl_resting_ms=725.55
+[engine] 05:19:55.099 perf cancel oid=363552872162 cancel_trigger_to_send_ms=0.000263 cancel_send_to_ack_ms=258.994 hl_resting_ms=890.475
+[engine] 05:19:56.973 perf cancel oid=363552886030 cancel_trigger_to_send_ms=0.000238 cancel_send_to_ack_ms=582.61 hl_resting_ms=681.89
+[engine] 05:20:06.987 perf cancel oid=363553055204 cancel_trigger_to_send_ms=0.000263 cancel_send_to_ack_ms=689.215 hl_resting_ms=238.904

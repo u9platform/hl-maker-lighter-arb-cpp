@@ -1,0 +1,8 @@
+ubuntu    304038  0.0  0.0   7460  1864 ?        S    05:17   0:00 bash -c cd /home/ubuntu/lighter-hl-arb-cpp && > /tmp/arb_live.log && nohup bash start.sh &
+ubuntu    304039  3.9  1.4 2149624 26628 ?       Sl   05:17   0:07 ./build/arb_live
+---
+[engine] 05:20:06.987 perf cancel oid=363553055204 cancel_trigger_to_send_ms=0.000263 cancel_send_to_ack_ms=689.215 hl_resting_ms=238.904
+[engine] 05:20:07.258 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Insufficient margin to place order. asset=159"}]}}}
+[engine] 05:20:07.790 cancel requested with no active oid
+[engine] 05:20:08.636 hl maker placement failed: {"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Post only order would have immediately matched, bbo was 38.34@38.341. asset=159"}]}}}
+[engine] 05:20:09.038 cancel requested with no active oid

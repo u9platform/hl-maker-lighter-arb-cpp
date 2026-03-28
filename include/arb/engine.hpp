@@ -1,8 +1,10 @@
 #pragma once
 
 #include "arb/exchange.hpp"
+#include "arb/journal.hpp"
 #include "arb/strategy.hpp"
 
+#include <memory>
 #include <optional>
 #include <cstdint>
 #include <string>
@@ -27,7 +29,8 @@ class MakerHedgeEngine {
     MakerHedgeEngine(
         EngineConfig config,
         HyperliquidExchange& hl,
-        LighterExchange& lighter
+        LighterExchange& lighter,
+        TradeJournal* journal = nullptr
     );
 
     [[nodiscard]] SpreadSnapshot collect_snapshot() const;
@@ -76,6 +79,9 @@ class MakerHedgeEngine {
     
     // Returns true if current position exceeds max_position_usd.
     [[nodiscard]] bool position_limit_reached(double mid_price) const noexcept;
+
+    // Trade journal — optional, owned externally.  nullptr disables.
+    TradeJournal* journal_ {nullptr};
 };
 
 }  // namespace arb
