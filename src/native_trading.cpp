@@ -761,7 +761,7 @@ std::uint64_t NativeLighterTrading::fetch_remote_next_nonce() const {
 
 void NativeLighterTrading::refresh_nonce_cache() const {
     const std::uint64_t remote_nonce = fetch_remote_next_nonce();
-    nonce_cache_.store(remote_nonce + 1, std::memory_order_release);
+    nonce_cache_.store(remote_nonce, std::memory_order_release);
 }
 
 std::uint64_t NativeLighterTrading::next_nonce() const {
