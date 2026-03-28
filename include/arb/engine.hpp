@@ -4,6 +4,7 @@
 #include "arb/strategy.hpp"
 
 #include <optional>
+#include <cstdint>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -31,7 +32,7 @@ class MakerHedgeEngine {
 
     [[nodiscard]] SpreadSnapshot collect_snapshot() const;
     [[nodiscard]] std::vector<EventLog> on_market_data(std::int64_t now_ms);
-    [[nodiscard]] std::vector<EventLog> on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, const std::string& oid);
+    [[nodiscard]] std::vector<EventLog> on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, const std::string& oid, std::uint64_t fill_rx_ns);
     [[nodiscard]] std::vector<EventLog> on_lighter_hedge_reject();
     void on_lighter_hedge_fill(double fill_price);
 
@@ -40,6 +41,18 @@ class MakerHedgeEngine {
     [[nodiscard]] double hl_position_base() const noexcept;
 
   private:
+    struct OrderPerfTrace {
+        std::string oid;
+        std::uint64_t signal_ns {0};
+        std::uint64_t hl_send_ns {0};
+        std::uint64_t hl_ack_ns {0};
+        std::uint64_t cancel_trigger_ns {0};
+        std::uint64_t cancel_send_ns {0};
+        std::uint64_t hl_fill_rx_ns {0};
+        std::uint64_t lighter_send_ns {0};
+        std::uint64_t lighter_ack_ns {0};
+    };
+
     [[nodiscard]] std::vector<EventLog> execute_action(const Action& action, const SpreadSnapshot& snapshot);
 
     EngineConfig config_;
@@ -59,6 +72,7 @@ class MakerHedgeEngine {
     // Track absolute HL position in base units for position limit enforcement.
     // Positive = long, negative = short. Updated on each fill.
     double hl_position_base_ {0.0};
+    OrderPerfTrace perf_trace_;
     
     // Returns true if current position exceeds max_position_usd.
     [[nodiscard]] bool position_limit_reached(double mid_price) const noexcept;

@@ -1,6 +1,7 @@
 #include "arb/engine.hpp"
 #include "arb/market_feed.hpp"
 #include "arb/native_trading.hpp"
+#include "arb/perf.hpp"
 #include "arb/risk.hpp"
 #include "arb/types.hpp"
 #include "arb/ws_exchange.hpp"
@@ -31,6 +32,7 @@ struct FillEvent {
     double size;
     bool is_buy;
     std::string oid;
+    std::uint64_t local_rx_ns {0};
 };
 
 std::mutex g_fill_mu;
@@ -172,7 +174,7 @@ int main() {
             // Enqueue fill event — processed on main thread to avoid data races on engine state.
             {
                 std::lock_guard lock(g_fill_mu);
-                g_fill_queue.push(FillEvent {coin, price, size, is_buy, oid});
+                g_fill_queue.push(FillEvent {coin, price, size, is_buy, oid, arb::perf_now_ns()});
             }
             g_cv.notify_one();  // Wake main loop immediately.
         });
@@ -236,7 +238,7 @@ int main() {
 
                 // BUG FIX 3: Pass the OID to engine so it can handle the race condition
                 const auto fill_snap = feed.snapshot();
-                const auto logs = engine.on_hl_fill(fill.price, fill.size, fill_snap, fill.oid);
+                const auto logs = engine.on_hl_fill(fill.price, fill.size, fill_snap, fill.oid, fill.local_rx_ns);
                 for (const auto& log : logs) {
                     std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
                 }
@@ -311,6 +313,10 @@ int main() {
                       << " state=" << static_cast<int>(engine.strategy().state())
                       << " pos=" << std::setprecision(2) << engine.hl_position_base()
                       << " fills_ws=" << (fills_subscribed ? "SUBSCRIBED" : "NOT_SUBSCRIBED") << '\n';
+
+            for (const auto& line : arb::PerfCollector::instance().drain_summary_lines()) {
+                std::cerr << "[perf] " << timestamp_str() << ' ' << line << '\n';
+            }
 
             // Note: Kill switch logic for fill feed is now handled every tick above,
             // so we don't need the old lazy check here anymore.

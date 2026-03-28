@@ -91,33 +91,34 @@ void test_cancels_when_spread_reverts_below_band() {
 void test_sends_lighter_hedge_after_hl_fill() {
     FakeHlExchange hl;
     FakeLighterExchange lighter;
+    lighter.ioc_ack.fill_confirmed = true;
+    lighter.ioc_ack.confirmed_size = 2.5;
     arb::EngineConfig config;
     arb::MakerHedgeEngine engine(config, hl, lighter);
 
     const auto initial_logs = engine.on_market_data(1000);
     require(!initial_logs.empty(), "expected initial placement logs");
     const arb::SpreadSnapshot snapshot = engine.collect_snapshot();
-    const auto logs = engine.on_hl_fill(10.0, 2.5, snapshot, "oid-1");
+    const auto logs = engine.on_hl_fill(10.0, 2.5, snapshot, "oid-1", 1000);
 
     require(lighter.ioc_count == 1, "expected one lighter IOC");
     require(!logs.empty(), "expected hedge log");
-    require(engine.strategy().state() == arb::StrategyState::HlFilledPendingLighterHedge,
-            "expected strategy to wait for hedge fill ack");
+    require(engine.strategy().state() == arb::StrategyState::Idle,
+            "expected strategy to reset after confirmed hedge");
 }
 
 void test_hedge_reject_triggers_hl_unwind() {
     FakeHlExchange hl;
     FakeLighterExchange lighter;
+    lighter.ioc_ack.ok = false;
+    lighter.ioc_ack.message = "reject";
     arb::EngineConfig config;
     arb::MakerHedgeEngine engine(config, hl, lighter);
 
     const auto initial_logs = engine.on_market_data(1000);
     require(!initial_logs.empty(), "expected initial placement logs");
     const arb::SpreadSnapshot snapshot = engine.collect_snapshot();
-    const auto hedge_logs = engine.on_hl_fill(10.0, 2.5, snapshot, "oid-1");
-    require(!hedge_logs.empty(), "expected hedge logs");
-    const auto logs = engine.on_lighter_hedge_reject();
-
+    const auto logs = engine.on_hl_fill(10.0, 2.5, snapshot, "oid-1", 1000);
     require(hl.reduce_count == 1, "expected one HL unwind");
     require(!logs.empty(), "expected unwind log");
 }

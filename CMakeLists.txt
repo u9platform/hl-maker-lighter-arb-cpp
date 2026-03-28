@@ -16,6 +16,7 @@ add_library(arb_core
     src/http.cpp
     src/msgpack.cpp
     src/native_trading.cpp
+    src/perf.cpp
     src/public_exchange.cpp
     src/strategy.cpp
     src/risk.cpp

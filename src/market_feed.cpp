@@ -1,4 +1,5 @@
 #include "arb/market_feed.hpp"
+#include "arb/perf.hpp"
 
 #include <iostream>
 #include <regex>
@@ -302,6 +303,7 @@ bool MarketFeed::hl_connected() const noexcept { return hl_ws_ && hl_ws_->is_con
 bool MarketFeed::lighter_connected() const noexcept { return lighter_ws_ && lighter_ws_->is_connected(); }
 
 void MarketFeed::on_hl_message(const std::string& msg) {
+    const std::uint64_t local_rx_ns = perf_now_ns();
     // HL WS protocol: we send subscribe, then get subscriptionResponse, then data.
     if (!hl_subscribed_.load(std::memory_order_relaxed)) {
         if (msg.find("subscriptionResponse") != std::string::npos) {
@@ -321,11 +323,16 @@ void MarketFeed::on_hl_message(const std::string& msg) {
     }
     if (ok) {
         hl_bbo_.store(bid, ask);
+        PerfCollector::instance().record_hot_path(
+            PerfMetric::HlMarketLocalRxToBboUpdateNs,
+            perf_now_ns() - local_rx_ns
+        );
         if (on_update_) on_update_();
     }
 }
 
 void MarketFeed::on_lighter_message(const std::string& msg) {
+    const std::uint64_t local_rx_ns = perf_now_ns();
     // Lighter sends {"type":"connected"} first, then we subscribe.
     if (msg.find("\"connected\"") != std::string::npos && !lighter_subscribed_.load(std::memory_order_relaxed)) {
         subscribe_lighter();
@@ -355,6 +362,10 @@ void MarketFeed::on_lighter_message(const std::string& msg) {
             if (ask <= 0.0) ask = current.ask;
             if (bid > 0.0 && ask > 0.0) {
                 lighter_bbo_.store(bid, ask);
+                PerfCollector::instance().record_hot_path(
+                    PerfMetric::LighterMarketLocalRxToBboUpdateNs,
+                    perf_now_ns() - local_rx_ns
+                );
                 if (on_update_) on_update_();
             }
         }
