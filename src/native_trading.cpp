@@ -251,11 +251,10 @@ std::string NativeHyperliquidTrading::post_exchange_action(const std::string& ac
         ",\"nonce\":" + nonce_str +
         ",\"signature\":" + signature +
         ",\"vaultAddress\":" + vault_part + ",\"expiresAfter\":null}";
-    if (action_transport_) {
-        return action_transport_(body);
+    if (!action_transport_) {
+        throw std::runtime_error("Hyperliquid action transport unavailable: WS post transport is required");
     }
-    const HttpResponse response = http_post(config_.api_url + "/exchange", body, {{"Content-Type", "application/json"}});
-    return response.body;
+    return action_transport_(body);
 }
 
 std::string NativeHyperliquidTrading::sign_l1_action(const Bytes32& action_hash) const {

@@ -185,7 +185,8 @@ int main() {
         });
         std::cerr << "[main] hl order transport=ws_post\n";
     } else {
-        std::cerr << "[main] WARNING: hl ws_post transport unavailable, falling back to HTTP\n";
+        std::cerr << "ERROR: hl ws_post transport unavailable; refusing to fall back to HTTP\n";
+        return 1;
     }
 
     arb::NativeLighterTrading lighter_native({
