@@ -742,6 +742,17 @@ std::vector<EventLog> MakerHedgeEngine::on_trade_event(const TradeEvent& trade) 
     }
 
     if (!price_crossed) {
+        // Log periodically for debugging (every 100th non-crossing trade while order is active)
+        static int skip_count = 0;
+        if (++skip_count % 100 == 0) {
+            std::vector<EventLog> dbg;
+            std::ostringstream m;
+            m << "spec_hedge_debug: " << skip_count << " trades checked, none crossed. "
+              << "maker_px=" << maker_price << " " << (maker_is_buy ? "BUY" : "SELL")
+              << " last_trade_px=" << trade_price;
+            dbg.push_back(EventLog{.message = m.str()});
+            return dbg;
+        }
         return {};
     }
 
