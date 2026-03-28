@@ -1,0 +1,133 @@
+#pragma once
+
+#include "arb/types.hpp"
+#include "arb/ws_client.hpp"
+
+#include <atomic>
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+
+namespace arb {
+
+/// Thread-safe BBO store updated by WS callbacks.
+/// Readers on the strategy thread call latest_snapshot().
+/// Writers are the WS IO threads.
+struct AtomicBbo {
+    mutable std::mutex mu;
+    Bbo bbo;
+    std::chrono::steady_clock::time_point last_update {};
+
+    void store(double bid, double ask) {
+        std::lock_guard lock(mu);
+        bbo.bid = bid;
+        bbo.ask = ask;
+        last_update = std::chrono::steady_clock::now();
+    }
+
+    [[nodiscard]] Bbo load() const {
+        std::lock_guard lock(mu);
+        Bbo out = bbo;
+        if (last_update.time_since_epoch().count() > 0) {
+            const auto age = std::chrono::steady_clock::now() - last_update;
+            out.quote_age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(age).count();
+        } else {
+            out.quote_age_ms = 999999;
+        }
+        return out;
+    }
+};
+
+/// Callback fired on *every* BBO update from either venue.
+using OnBboUpdate = std::function<void()>;
+
+/// Manages WS connections to HL and Lighter, parses orderbook messages,
+/// and maintains thread-safe BBO state.
+class MarketFeed {
+  public:
+    struct Config {
+        std::string hl_ws_host {"api.hyperliquid.xyz"};
+        std::string hl_ws_path {"/ws"};
+        std::string hl_coin {"HYPE"};
+        std::string lighter_ws_host {"mainnet.zklighter.elliot.ai"};
+        std::string lighter_ws_path {"/stream"};
+        int lighter_market_id {24};
+    };
+
+    explicit MarketFeed(Config config);
+    ~MarketFeed();
+
+    MarketFeed(const MarketFeed&) = delete;
+    MarketFeed& operator=(const MarketFeed&) = delete;
+
+    /// Set callback before start().
+    void set_on_update(OnBboUpdate cb);
+
+    /// Start both WS connections.
+    void start();
+
+    /// Stop both WS connections.
+    void stop();
+
+    /// Get current snapshot. Thread-safe, called from strategy thread.
+    [[nodiscard]] SpreadSnapshot snapshot() const;
+
+    /// Get individual BBOs. Thread-safe.
+    [[nodiscard]] Bbo hl_bbo() const;
+    [[nodiscard]] Bbo lighter_bbo() const;
+
+    [[nodiscard]] bool hl_connected() const noexcept;
+    [[nodiscard]] bool lighter_connected() const noexcept;
+
+    /// Access internal BBO stores (for WS exchange adapters).
+    [[nodiscard]] AtomicBbo& hl_bbo_store() noexcept { return hl_bbo_; }
+    [[nodiscard]] AtomicBbo& lighter_bbo_store() noexcept { return lighter_bbo_; }
+
+  private:
+    void on_hl_message(const std::string& msg);
+    void on_lighter_message(const std::string& msg);
+    void subscribe_hl();
+    void subscribe_lighter();
+
+    Config config_;
+    std::unique_ptr<WsClient> hl_ws_;
+    std::unique_ptr<WsClient> lighter_ws_;
+    AtomicBbo hl_bbo_;
+    AtomicBbo lighter_bbo_;
+    OnBboUpdate on_update_;
+    std::atomic<bool> hl_subscribed_ {false};
+    std::atomic<bool> lighter_subscribed_ {false};
+};
+
+/// HL WebSocket user fill feed — subscribe to userFills for fill callbacks.
+class HlFillFeed {
+  public:
+    struct Config {
+        std::string ws_host {"api.hyperliquid.xyz"};
+        std::string ws_path {"/ws"};
+        std::string user_address;
+    };
+
+    using FillCallback = std::function<void(const std::string& coin, double price, double size, bool is_buy, const std::string& oid)>;
+
+    explicit HlFillFeed(Config config);
+    ~HlFillFeed();
+
+    void set_on_fill(FillCallback cb);
+    void start();
+    void stop();
+    [[nodiscard]] bool is_connected() const noexcept;
+
+  private:
+    void on_message(const std::string& msg);
+    void subscribe();
+
+    Config config_;
+    std::unique_ptr<WsClient> ws_;
+    FillCallback on_fill_;
+    std::atomic<bool> subscribed_ {false};
+};
+
+}  // namespace arb
