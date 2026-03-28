@@ -251,6 +251,8 @@ void MarketFeed::start() {
     hl_ws_->set_on_disconnect([this](const std::string& reason) {
         std::cerr << "[hl-ws] disconnected: " << reason << '\n';
         hl_subscribed_.store(false, std::memory_order_release);
+        // Re-queue subscribe for reconnect (pending_sends_ was cleared on last handshake).
+        subscribe_hl();
     });
 
     // Queue the subscribe message — it will be sent as soon as WS handshake completes.
@@ -269,6 +271,8 @@ void MarketFeed::start() {
     lighter_ws_->set_on_disconnect([this](const std::string& reason) {
         std::cerr << "[lighter-ws] disconnected: " << reason << '\n';
         lighter_subscribed_.store(false, std::memory_order_release);
+        // No need to re-queue subscribe here — Lighter WS sends {"type":"connected"}
+        // on reconnect, which triggers subscribe_lighter() in on_lighter_message().
     });
     lighter_ws_->connect();
 }
@@ -398,6 +402,10 @@ void HlFillFeed::start() {
     ws_->set_on_disconnect([this](const std::string& reason) {
         std::cerr << "[hl-fills] disconnected: " << reason << ", will resubscribe on reconnect\n";
         subscribed_.store(false, std::memory_order_release);
+        // BUG FIX 1: Re-queue subscribe for next reconnect.
+        // WsClient::send() queues to pending_sends_ when disconnected,
+        // which gets flushed on the next successful handshake.
+        subscribe();
         // Notify main thread to activate kill switch immediately
         if (on_disconnect_) {
             on_disconnect_(reason);
@@ -405,8 +413,7 @@ void HlFillFeed::start() {
     });
     
     // BUG FIX 1: Queue the subscribe message before connecting (like MarketFeed does)
-    // This ensures that the subscription will be sent as soon as WS handshake completes,
-    // even after reconnections when HL WS doesn't send initial messages to trigger on_message()
+    // This ensures that the subscription will be sent as soon as WS handshake completes.
     subscribe();
     ws_->connect();
 }
