@@ -10,7 +10,9 @@ namespace {
 constexpr std::uint64_t kNsPerMs = 1000ULL * 1000ULL;
 
 bool metric_uses_raw_ms(PerfMetric metric) {
-    return metric == PerfMetric::CrossVenueAlignmentMs;
+    return metric == PerfMetric::HlQuoteAgeMs
+        || metric == PerfMetric::LighterQuoteAgeMs
+        || metric == PerfMetric::CrossVenueAlignmentMs;
 }
 
 }  // namespace
@@ -78,6 +80,8 @@ std::vector<std::string> PerfCollector::drain_summary_lines() {
         oss << " unit=" << unit_name(metric);
         if (metric == PerfMetric::HlMarketLocalRxToBboUpdateNs ||
             metric == PerfMetric::LighterMarketLocalRxToBboUpdateNs ||
+            metric == PerfMetric::HlQuoteAgeMs ||
+            metric == PerfMetric::LighterQuoteAgeMs ||
             metric == PerfMetric::CrossVenueAlignmentMs ||
             metric == PerfMetric::StrategyDecisionNs) {
             oss << " sampled=1";
@@ -92,6 +96,8 @@ std::string PerfCollector::metric_name(PerfMetric metric) {
     switch (metric) {
         case PerfMetric::HlMarketLocalRxToBboUpdateNs: return "hl_market_local_rx_to_bbo_update";
         case PerfMetric::LighterMarketLocalRxToBboUpdateNs: return "lighter_market_local_rx_to_bbo_update";
+        case PerfMetric::HlQuoteAgeMs: return "hl_quote_age";
+        case PerfMetric::LighterQuoteAgeMs: return "lighter_quote_age";
         case PerfMetric::CrossVenueAlignmentMs: return "cross_venue_alignment";
         case PerfMetric::StrategyDecisionNs: return "strategy_decision";
         case PerfMetric::SignalToHlMakerSendNs: return "signal_to_hl_maker_send";

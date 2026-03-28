@@ -12,6 +12,8 @@ namespace arb {
 enum class PerfMetric : std::uint8_t {
     HlMarketLocalRxToBboUpdateNs = 0,
     LighterMarketLocalRxToBboUpdateNs,
+    HlQuoteAgeMs,
+    LighterQuoteAgeMs,
     CrossVenueAlignmentMs,
     StrategyDecisionNs,
     SignalToHlMakerSendNs,

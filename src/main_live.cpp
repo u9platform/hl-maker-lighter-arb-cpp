@@ -389,6 +389,15 @@ int main() {
             std::chrono::steady_clock::now().time_since_epoch()).count();
         ++tick_count;
 
+        arb::PerfCollector::instance().record_hot_path(
+            arb::PerfMetric::HlQuoteAgeMs,
+            static_cast<std::uint64_t>(std::max<std::int64_t>(snap.hl.quote_age_ms, 0))
+        );
+        arb::PerfCollector::instance().record_hot_path(
+            arb::PerfMetric::LighterQuoteAgeMs,
+            static_cast<std::uint64_t>(std::max<std::int64_t>(snap.lighter.quote_age_ms, 0))
+        );
+
         // Skip until both venues have valid data.
         if (snap.hl.bid <= 0.0 || snap.lighter.bid <= 0.0) continue;
 
@@ -463,7 +472,9 @@ int main() {
                       << " version=" << ARB_GIT_VERSION
                       << " spread=" << std::fixed << std::setprecision(2) << snap.cross_spread_bps << "bps"
                       << " hl=" << snap.hl.bid << "/" << snap.hl.ask
+                      << " hl_age=" << snap.hl.quote_age_ms << "ms"
                       << " lt=" << snap.lighter.bid << "/" << snap.lighter.ask
+                      << " lt_age=" << snap.lighter.quote_age_ms << "ms"
                       << " state=" << static_cast<int>(engine.strategy().state())
                       << " pos=" << std::setprecision(2) << engine.hl_position_base()
                       << " fills_ws=" << (fills_subscribed ? "SUBSCRIBED" : "NOT_SUBSCRIBED") << '\n';
