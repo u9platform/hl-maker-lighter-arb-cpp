@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <iomanip>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -519,15 +520,18 @@ std::uint32_t NativeLighterTrading::scaled_price(double price) const {
 }
 
 std::string NativeLighterTrading::json_escape(const std::string& value) {
-    std::string out;
-    out.reserve(value.size());
-    for (char ch : value) {
-        if (ch == '"' || ch == '\\') {
-            out.push_back('\\');
+    // URL-encode for application/x-www-form-urlencoded
+    std::ostringstream encoded;
+    encoded.fill('0');
+    encoded << std::hex;
+    for (unsigned char ch : value) {
+        if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+            encoded << ch;
+        } else {
+            encoded << '%' << std::setw(2) << std::uppercase << static_cast<int>(ch);
         }
-        out.push_back(ch);
     }
-    return out;
+    return encoded.str();
 }
 
 }  // namespace arb
