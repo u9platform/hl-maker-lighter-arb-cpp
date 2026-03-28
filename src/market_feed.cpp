@@ -378,6 +378,16 @@ bool MarketFeed::lighter_connected() const noexcept { return lighter_ws_ && ligh
 void MarketFeed::on_hl_message(const std::string& msg) {
     const std::uint64_t local_rx_ns = perf_now_ns();
     
+    // Debug: log first 20 HL WS messages to diagnose missing trades subscription
+    {
+        static int hl_msg_count = 0;
+        if (hl_msg_count < 20) {
+            std::cerr << "[hl-ws] msg#" << hl_msg_count << " len=" << msg.size()
+                      << " : " << msg.substr(0, 150) << '\n';
+            ++hl_msg_count;
+        }
+    }
+
     // HL WS protocol: we send subscribe, then get subscriptionResponse, then data.
     if (msg.find("subscriptionResponse") != std::string::npos) {
         std::cerr << "[hl-ws] got subscriptionResponse: " << msg.substr(0, 200) << '\n';
