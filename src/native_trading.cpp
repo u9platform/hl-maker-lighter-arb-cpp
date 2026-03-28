@@ -154,7 +154,7 @@ HlLimitOrderAck NativeHyperliquidTrading::place_limit_order(const HlLimitOrderRe
     const auto& meta = meta_for_coin(request.coin);
     const std::uint64_t nonce = current_timestamp_ms();
     const std::string action_json = order_action_json(request, meta, false, false);
-    const Bytes32 hash = order_action_hash(request, meta, false, false);
+    const Bytes32 hash = order_action_hash(request, meta, false, false, nonce);
     const std::string body = post_exchange_action(action_json, hash, nonce);
 
     const std::regex resting(R"REGEX("resting":\{"oid":([0-9]+)\})REGEX");
@@ -172,7 +172,7 @@ HlCancelAck NativeHyperliquidTrading::cancel_order(const std::string& coin, cons
     }
     const std::uint64_t nonce = current_timestamp_ms();
     const std::string action_json = cancel_action_json(coin, oid);
-    const Bytes32 hash = cancel_action_hash(coin, oid);
+    const Bytes32 hash = cancel_action_hash(coin, oid, nonce);
     const std::string body = post_exchange_action(action_json, hash, nonce);
     return HlCancelAck {.ok = body.find("\"status\":\"ok\"") != std::string::npos, .message = body, .oid = oid};
 }
@@ -193,7 +193,7 @@ HlReduceAck NativeHyperliquidTrading::reduce_position(const std::string& coin, b
     const auto& meta = meta_for_coin(coin);
     const std::uint64_t nonce = current_timestamp_ms();
     const std::string action_json = order_action_json(request, meta, true, true);
-    const Bytes32 hash = order_action_hash(request, meta, true, true);
+    const Bytes32 hash = order_action_hash(request, meta, true, true, nonce);
     const std::string body = post_exchange_action(action_json, hash, nonce);
     const std::regex filled_size_pattern(R"REGEX("totalSz":"([^"]+)")REGEX");
     const std::regex avg_px_pattern(R"REGEX("avgPx":"([^"]+)")REGEX");
@@ -292,7 +292,22 @@ std::string NativeHyperliquidTrading::cancel_action_json(const std::string& coin
     return "{\"type\":\"cancel\",\"cancels\":[{\"a\":" + std::to_string(meta.asset) + ",\"o\":" + oid + "}]}";
 }
 
-Bytes32 NativeHyperliquidTrading::order_action_hash(const HlLimitOrderRequest& request, const MetaEntry& meta, bool ioc, bool reduce_only) const {
+void NativeHyperliquidTrading::append_vault_and_nonce(ByteBuffer& buf, std::uint64_t nonce) const {
+    // Append nonce as big-endian 8 bytes
+    for (int i = 7; i >= 0; --i) {
+        buf.push_back(static_cast<std::uint8_t>((nonce >> (8 * i)) & 0xff));
+    }
+    // vault_address flag + optional 20-byte address
+    if (config_.vault_address.has_value()) {
+        buf.push_back(0x01);
+        const auto addr_bytes = hex_to_bytes(config_.vault_address.value());
+        buf.insert(buf.end(), addr_bytes.begin(), addr_bytes.end());
+    } else {
+        buf.push_back(0x00);
+    }
+}
+
+Bytes32 NativeHyperliquidTrading::order_action_hash(const HlLimitOrderRequest& request, const MetaEntry& meta, bool ioc, bool reduce_only, std::uint64_t nonce) const {
     ByteBuffer out;
     mp_pack_map_size(out, 3);
     mp_pack_str(out, "type");
@@ -319,14 +334,11 @@ Bytes32 NativeHyperliquidTrading::order_action_hash(const HlLimitOrderRequest& r
     mp_pack_str(out, "grouping");
     mp_pack_str(out, "na");
 
-    const std::uint64_t nonce = current_timestamp_ms();
-    out.insert(out.end(), reinterpret_cast<const std::uint8_t*>(&nonce), reinterpret_cast<const std::uint8_t*>(&nonce) + 8);
-    std::reverse(out.end() - 8, out.end());
-    out.push_back(0x00);
+    append_vault_and_nonce(out, nonce);
     return keccak256(out);
 }
 
-Bytes32 NativeHyperliquidTrading::cancel_action_hash(const std::string& coin, const std::string& oid) const {
+Bytes32 NativeHyperliquidTrading::cancel_action_hash(const std::string& coin, const std::string& oid, std::uint64_t nonce) const {
     const auto& meta = meta_for_coin(coin);
     ByteBuffer out;
     mp_pack_map_size(out, 2);
@@ -339,10 +351,8 @@ Bytes32 NativeHyperliquidTrading::cancel_action_hash(const std::string& coin, co
     mp_pack_uint(out, static_cast<std::uint64_t>(meta.asset));
     mp_pack_str(out, "o");
     mp_pack_uint(out, static_cast<std::uint64_t>(std::stoull(oid)));
-    const std::uint64_t nonce = current_timestamp_ms();
-    out.insert(out.end(), reinterpret_cast<const std::uint8_t*>(&nonce), reinterpret_cast<const std::uint8_t*>(&nonce) + 8);
-    std::reverse(out.end() - 8, out.end());
-    out.push_back(0x00);
+
+    append_vault_and_nonce(out, nonce);
     return keccak256(out);
 }
 

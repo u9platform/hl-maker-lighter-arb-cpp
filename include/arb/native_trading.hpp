@@ -3,9 +3,11 @@
 #include "arb/crypto.hpp"
 #include "arb/exchange.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace arb {
 
@@ -44,8 +46,9 @@ class NativeHyperliquidTrading final : public HyperliquidExchange {
     [[nodiscard]] std::string sign_l1_action(const Bytes32& action_hash) const;
     [[nodiscard]] std::string order_action_json(const HlLimitOrderRequest& request, const MetaEntry& meta, bool ioc, bool reduce_only) const;
     [[nodiscard]] std::string cancel_action_json(const std::string& coin, const std::string& oid) const;
-    [[nodiscard]] Bytes32 order_action_hash(const HlLimitOrderRequest& request, const MetaEntry& meta, bool ioc, bool reduce_only) const;
-    [[nodiscard]] Bytes32 cancel_action_hash(const std::string& coin, const std::string& oid) const;
+    [[nodiscard]] Bytes32 order_action_hash(const HlLimitOrderRequest& request, const MetaEntry& meta, bool ioc, bool reduce_only, std::uint64_t nonce) const;
+    [[nodiscard]] Bytes32 cancel_action_hash(const std::string& coin, const std::string& oid, std::uint64_t nonce) const;
+    void append_vault_and_nonce(std::vector<std::uint8_t>& buf, std::uint64_t nonce) const;
     [[nodiscard]] static std::string float_to_wire(double value);
     [[nodiscard]] static double round_sig_figs(double value, int sig_figs);
     void ensure_meta() const;
