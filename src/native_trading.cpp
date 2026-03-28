@@ -314,7 +314,7 @@ Bytes32 NativeHyperliquidTrading::order_action_hash(const HlLimitOrderRequest& r
     mp_pack_str(out, "order");
     mp_pack_str(out, "orders");
     mp_pack_array_size(out, 1);
-    mp_pack_map_size(out, 5);
+    mp_pack_map_size(out, 6);
     mp_pack_str(out, "a");
     mp_pack_uint(out, static_cast<std::uint64_t>(meta.asset));
     mp_pack_str(out, "b");
