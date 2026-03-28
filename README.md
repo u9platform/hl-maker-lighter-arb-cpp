@@ -1,105 +1,106 @@
 # HL Maker Lighter Arb C++
 
-This project is a fresh C++ rewrite of the execution core for a single strategy:
+C++ HFT rewrite of the HL maker / Lighter taker HYPE perpetual futures arbitrage bot.
 
-- watch the HYPE cross-exchange spread between Hyperliquid and Lighter
-- when `abs(spread) >= SPREAD`, place a `post-only` maker order on Hyperliquid
-- while the order is still resting, cancel it when `abs(spread) < SPREAD - X`
-- if the Hyperliquid maker order fills, immediately send a `taker/IOC` hedge to Lighter
+## Strategy
 
-The rewrite intentionally excludes the old parallel dual-taker entry path.
+- Watch the HYPE cross-exchange spread between Hyperliquid and Lighter
+- When `abs(spread) >= SPREAD`, place a `post-only` maker order on Hyperliquid
+- While the order is resting, cancel if `abs(spread) < SPREAD - CANCEL_BAND`
+- On HL maker fill, immediately send a taker/IOC hedge to Lighter
 
-## Current Scope
+## Architecture
 
-The repository currently contains:
+```
+┌─────────────────────────────────────────────┐
+│              main_live event loop            │
+│  CV-driven: wakes on WS BBO update or 100ms │
+├─────────┬─────────┬──────────┬──────────────┤
+│ Market  │ Fill    │ Risk     │ Strategy +   │
+│ Feed    │ Feed    │ Guard    │ Engine       │
+│ (WS)    │ (WS)   │          │              │
+├─────────┴─────────┴──────────┴──────────────┤
+│        WS Exchange Adapters                  │
+│  WS BBO reads + native signing for writes    │
+├──────────────────────────────────────────────┤
+│  WsClient (Boost.Beast TLS WebSocket)        │
+│  NativeHyperliquidTrading (EIP712+secp256k1) │
+│  NativeLighterTrading (FFI lighter-signer)   │
+└──────────────────────────────────────────────┘
+```
 
-- a small strategy state machine in [`include/arb/strategy.hpp`](./include/arb/strategy.hpp)
-- domain types in [`include/arb/types.hpp`](./include/arb/types.hpp)
-- exchange adapter interfaces in [`include/arb/exchange.hpp`](./include/arb/exchange.hpp)
-- native public market-data clients in [`include/arb/public_exchange.hpp`](./include/arb/public_exchange.hpp)
-- native trading clients in [`include/arb/native_trading.hpp`](./include/arb/native_trading.hpp)
-- a native execution engine in [`include/arb/engine.hpp`](./include/arb/engine.hpp)
-- a lightweight test binary in [`tests/test_strategy.cpp`](./tests/test_strategy.cpp)
-- a demo driver in [`src/main.cpp`](./src/main.cpp)
+### Components
 
-This is now a pure C++ codebase. Runtime trading and market data no longer require Python.
+| Layer | Files | Description |
+|-------|-------|-------------|
+| **Market Feed** | `ws_client.hpp/cpp`, `market_feed.hpp/cpp` | Boost.Beast TLS WebSocket with auto-reconnect. HL l2Book + Lighter order_book subscriptions. Thread-safe AtomicBbo |
+| **Fill Feed** | `market_feed.hpp/cpp` | HL userFills WS for fill callbacks |
+| **Strategy** | `strategy.hpp/cpp` | State machine: Idle → PendingHlMaker → HlFilledPendingLighterHedge → Open |
+| **Engine** | `engine.hpp/cpp` | Converts strategy intents to actual trades |
+| **Risk** | `risk.hpp/cpp` | Max exposure, stale quote kill switch, hedge failure tracking |
+| **WS Adapters** | `ws_exchange.hpp` | WS BBO for reads + native signing for writes (zero REST BBO overhead) |
+| **Signing** | `native_trading.hpp/cpp`, `crypto.hpp/cpp` | EIP712+secp256k1 for HL, FFI for Lighter |
+| **Event Loop** | `main_live.cpp` | Production: CV-driven ticks, risk checks, telemetry |
 
 ## Build
 
 ```bash
-cmake -S . -B build
-cmake --build build
-./build/arb_demo
+# Dependencies (macOS)
+brew install boost cmake secp256k1
+
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j8
 ```
 
-If `cmake` is not installed, the project can still be compiled directly with `clang++` as long as the `include/` and `src/` files are passed together.
+## Run
 
-## Native Runtime
+### WebSocket Smoke Test
+```bash
+./build/ws_smoke     # 30s test, prints live BBO from both venues
+```
 
-Current native status:
-
-- native C++:
-  - HL public orderbook
-  - Lighter public orderbook
-- HL signed trading:
-  - `place-limit`
-  - `cancel`
-  - `reduce`
-- Lighter signed trading:
-  - `place-ioc`
-
-Optional live credentials:
-
+### Production Bot
 ```bash
 export HL_PRIVATE_KEY=...
 export LIGHTER_API_PRIVATE_KEY=...
 export LIGHTER_ACCOUNT_INDEX=0
 export LIGHTER_API_KEY_INDEX=0
+export HL_USER_ADDRESS=0x...    # For fill feed (optional)
+export DRY_RUN=true             # Set false for live trading
+export SPREAD_BPS=2.0
+export CANCEL_BAND_BPS=0.5
+export PAIR_SIZE_USD=25.0
+export MAX_POSITION_USD=100.0
+
+./build/arb_live
 ```
 
-## Tests
-
-The current tests cover:
-
-- maker placement at `SPREAD`
-- maker cancel below `SPREAD - X`
-- Lighter hedge submission after HL fill
-- HL unwind after hedge rejection
-
-Run:
-
+### Unit Tests
 ```bash
-./arb_tests
+./build/arb_tests    # Strategy + engine tests
+./build/risk_tests   # Risk guard tests
 ```
 
-## Baseline
-
-The measurement plan is documented in [`docs/performance-baseline.md`](./docs/performance-baseline.md).
-
-C++ baseline:
-
+### Performance Baseline
 ```bash
-./native_baseline 5
+./build/native_baseline 5
 ```
 
-## Architecture Notes
+## Status
 
-The intended production layering is:
-
-1. `market_data`
-   Consumes HL and Lighter order book updates and produces normalized `SpreadSnapshot` events.
-2. `strategy`
-   Owns the maker lifecycle and emits intents such as `PlaceHlMaker`, `CancelHlMaker`, and `SendLighterTakerHedge`.
-3. `execution`
-   Converts intents into exchange-specific API calls.
-4. `risk`
-   Guards exposure, stale quotes, hedge failures, and forced unwind behavior.
-5. `telemetry`
-   Records timing, fill outcomes, and state transitions without polluting the core state machine.
+- ✅ Strategy state machine (Idle → PendingHlMaker → HlFilledPendingLighterHedge → Open)
+- ✅ Native HL signed trading (place_limit, cancel, reduce via EIP712 + secp256k1)
+- ✅ Native Lighter signed trading (place_ioc via FFI to lighter-signer dylib)
+- ✅ **WebSocket market data** — HL l2Book + Lighter orderbook, live verified
+- ✅ **WebSocket fill feed** — HL userFills for fill callbacks
+- ✅ **Risk module** — max exposure, stale quotes, hedge failures, kill switch
+- ✅ **Production event loop** — CV-driven, graceful shutdown, telemetry
+- ✅ Unit tests (strategy + risk)
 
 ## Next Steps
 
-- wire live fill callbacks into the strategy state machine
-- add websocket market-data clients for HL and Lighter
-- harden authenticated native trading with live integration tests
-- add deterministic tests for HL/Lighter native signing helpers
+- Live integration testing with real credentials
+- Telemetry: latency histograms, fill rate tracking
+- Position reconciliation on startup
+- HL `bbo` channel subscription (lower latency than l2Book)
+- Lighter full book state maintenance for deeper order book analysis
