@@ -70,6 +70,21 @@ std::string trim_0x(const std::string& hex) {
     return hex;
 }
 
+std::string url_encode(const std::string& value) {
+    std::ostringstream out;
+    out << std::hex << std::uppercase;
+    for (const unsigned char ch : value) {
+        if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+            || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.'
+            || ch == '~') {
+            out << static_cast<char>(ch);
+        } else {
+            out << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(ch);
+        }
+    }
+    return out.str();
+}
+
 using CreateClientFn = char* (*)(char*, char*, int, int, long long);
 using CreateAuthTokenFn = struct StrOrErr (*)(long long, int, long long);
 using SignCreateOrderFn = struct SignedTxResponse (*)(int, long long, long long, int, int, int, int, int, int, long long, long long, int, int, long long, int, long long);
@@ -411,8 +426,12 @@ NativeLighterTrading::NativeLighterTrading(LighterConfig config) : config_(std::
 
 NativeLighterTrading::~NativeLighterTrading() {
     if (signer_lib_ != nullptr) {
-        dlclose(signer_lib_);
+        delete static_cast<LighterSignerHandle*>(signer_lib_);
     }
+}
+
+void NativeLighterTrading::set_tx_transport(TxTransport transport) {
+    tx_transport_ = std::move(transport);
 }
 
 Bbo NativeLighterTrading::get_bbo(std::int64_t market_id) {
@@ -486,30 +505,36 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
         };
     }
 
-    const std::string encoded_tx_info = json_escape(tx_info);
-    const std::string body = "tx_type=" + std::to_string(result.txType) + "&tx_info=" + encoded_tx_info;
     std::cerr << "[lighter-debug] tx_type=" << static_cast<int>(result.txType)
               << " tx_info_raw=" << tx_info.substr(0, 200) << '\n';
-    const HttpResponse response = http_post(
-        config_.api_url + "/api/v1/sendTx",
-        body,
-        {{"Content-Type", "application/x-www-form-urlencoded"}}
-    );
+
+    std::string response_body;
+    if (tx_transport_) {
+        response_body = tx_transport_(result.txType, tx_info);
+    } else {
+        const std::string body = "tx_type=" + std::to_string(result.txType) + "&tx_info=" + url_encode(tx_info);
+        const HttpResponse response = http_post(
+            config_.api_url + "/api/v1/sendTx",
+            body,
+            {{"Content-Type", "application/x-www-form-urlencoded"}}
+        );
+        response_body = response.body;
+    }
     const std::uint64_t http_ack_ns = perf_now_ns();
     const std::uint64_t http_ack_latency_ns = http_ack_ns - submit_start_ns;
     PerfCollector::instance().record_trade_path(
         PerfMetric::LighterSendToHttpAckNs,
         http_ack_latency_ns
     );
-    std::cerr << "[lighter-debug] response=" << response.body << '\n';
+    std::cerr << "[lighter-debug] response=" << response_body << '\n';
 
-    const bool tx_accepted = response.body.find("\"code\":200") != std::string::npos
-                          || response.body.find("\"tx_hash\"") != std::string::npos;
+    const bool tx_accepted = response_body.find("\"code\":200") != std::string::npos
+                          || response_body.find("\"tx_hash\"") != std::string::npos;
     if (!tx_accepted) {
         return LighterIocAck {
             .ok = false,
             .fill_confirmed = false,
-            .message = response.body,
+            .message = response_body,
             .tx_hash = tx_hash,
             .confirmed_size = 0.0,
             .http_ack_latency_ms = static_cast<double>(http_ack_latency_ns) / 1000000.0,
@@ -519,15 +544,15 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     }
 
     const std::regex tx_hash_pattern(R"REGEX("tx_hash":"([^"]+)")REGEX");
-    const std::string confirmed_tx_hash = response.body.find("tx_hash") != std::string::npos
-        ? first_match_as_string(response.body, tx_hash_pattern)
+    const std::string confirmed_tx_hash = response_body.find("tx_hash") != std::string::npos
+        ? first_match_as_string(response_body, tx_hash_pattern)
         : tx_hash;
 
     // Wait for predicted execution time, then verify position changed
     const std::regex exec_time_pattern(R"REGEX("predicted_execution_time_ms":([0-9]+))REGEX");
     std::uint64_t wait_ms = 500;  // Default wait
     std::smatch exec_match;
-    if (std::regex_search(response.body, exec_match, exec_time_pattern)) {
+    if (std::regex_search(response_body, exec_match, exec_time_pattern)) {
         const std::uint64_t predicted = std::stoull(exec_match[1].str());
         const std::uint64_t now = current_timestamp_ms();
         if (predicted > now) {
@@ -585,7 +610,7 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     return LighterIocAck {
         .ok = tx_accepted,
         .fill_confirmed = fill_confirmed,
-        .message = response.body,
+        .message = response_body,
         .tx_hash = confirmed_tx_hash,
         .confirmed_size = confirmed_size,
         .fill_price = fill_price,

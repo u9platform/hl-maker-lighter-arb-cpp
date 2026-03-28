@@ -1,6 +1,7 @@
 #include "arb/engine.hpp"
 #include "arb/hl_ws_post.hpp"
 #include "arb/journal.hpp"
+#include "arb/lighter_ws_sendtx.hpp"
 #include "arb/market_feed.hpp"
 #include "arb/native_trading.hpp"
 #include "arb/perf.hpp"
@@ -147,6 +148,18 @@ int main() {
         .api_key_index = lighter_api_key_index,
         .market_index = 24,
     });
+    arb::LighterWsSendTxTransport lighter_ws_sendtx;
+    lighter_ws_sendtx.start();
+    if (lighter_ws_sendtx.wait_until_connected(2000)) {
+        lighter_native.set_tx_transport(
+            [&lighter_ws_sendtx](std::uint8_t tx_type, const std::string& tx_info_json) {
+                return lighter_ws_sendtx.send_tx(tx_type, tx_info_json);
+            }
+        );
+        std::cerr << "[main] lighter order transport=ws_sendtx\n";
+    } else {
+        std::cerr << "[main] WARNING: lighter ws_sendtx transport unavailable, falling back to HTTP\n";
+    }
 
     // --- WS Exchange Adapters: WS BBO for reads + native signing for writes ---
     arb::WsHyperliquidExchange hl_exchange(feed.hl_bbo_store(), hl_native);
@@ -361,6 +374,7 @@ int main() {
     // --- Shutdown ---
     std::cerr << "\n[main] shutting down...\n";
     journal.flush();
+    lighter_ws_sendtx.stop();
     hl_ws_post.stop();
     feed.stop();
     if (fill_feed) fill_feed->stop();

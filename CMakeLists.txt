@@ -61,6 +61,7 @@ find_package(OpenSSL REQUIRED)
 
 add_library(arb_ws
     src/hl_ws_post.cpp
+    src/lighter_ws_sendtx.cpp
     src/ws_client.cpp
     src/market_feed.cpp
 )

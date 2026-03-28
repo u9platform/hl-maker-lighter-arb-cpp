@@ -65,8 +65,12 @@ class NativeHyperliquidTrading final : public HyperliquidExchange {
 
 class NativeLighterTrading final : public LighterExchange {
   public:
+    using TxTransport = std::function<std::string(std::uint8_t tx_type, const std::string& tx_info_json)>;
+
     explicit NativeLighterTrading(LighterConfig config);
     ~NativeLighterTrading() override;
+
+    void set_tx_transport(TxTransport transport);
 
     [[nodiscard]] Bbo get_bbo(std::int64_t market_id) override;
     [[nodiscard]] LighterIocAck place_ioc_order(const LighterIocRequest& request) override;
@@ -86,6 +90,7 @@ class NativeLighterTrading final : public LighterExchange {
     [[nodiscard]] double query_position() const;
 
     LighterConfig config_;
+    TxTransport tx_transport_;
     void* signer_lib_ {nullptr};
     bool client_ready_ {false};
     int price_decimals_ {4};
