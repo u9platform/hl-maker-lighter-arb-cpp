@@ -39,6 +39,14 @@ SpreadSnapshot MakerHedgeEngine::collect_snapshot() const {
     };
 }
 
+std::int64_t MakerHedgeEngine::steady_now_ms() const noexcept {
+    return static_cast<std::int64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count()
+    );
+}
+
 bool MakerHedgeEngine::position_limit_reached(double mid_price) const noexcept {
     if (mid_price <= 0.0) return false;
     const double pos_usd = std::abs(hl_position_base_) * mid_price;
@@ -342,6 +350,14 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
         case ActionType::None:
             return events;
         case ActionType::PlaceHlMaker: {
+            // Rate limit: skip if too soon since last HL API call
+            {
+                const auto now = steady_now_ms();
+                if (now - last_hl_api_ms_ < config_.hl_order_interval_ms) {
+                    return events;  // Throttled — skip this tick
+                }
+                last_hl_api_ms_ = now;
+            }
             const std::uint64_t hl_send_ns = perf_now_ns();
             perf_trace_.hl_send_ns = hl_send_ns;
             if (perf_trace_.signal_ns > 0 && hl_send_ns >= perf_trace_.signal_ns) {
@@ -378,6 +394,14 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             return events;
         }
         case ActionType::CancelHlMaker: {
+            // Rate limit: skip if too soon since last HL API call
+            {
+                const auto now = steady_now_ms();
+                if (now - last_hl_api_ms_ < config_.hl_order_interval_ms) {
+                    return events;  // Throttled — skip this tick
+                }
+                last_hl_api_ms_ = now;
+            }
             if (!active_hl_oid_.has_value()) {
                 events.push_back(EventLog {.message = "cancel requested with no active oid"});
                 return events;
@@ -415,6 +439,8 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             return events;
         }
         case ActionType::SendLighterTakerHedge: {
+            // Rate limit Lighter API (but DON'T skip hedges — they're critical)
+            last_lighter_api_ms_ = steady_now_ms();
             const LighterIocAck ack = lighter_.place_ioc_order(LighterIocRequest {
                 .is_ask = action.hedge_intent->is_ask,
                 .price = action.hedge_intent->limit_price,

@@ -123,7 +123,9 @@ int main() {
               << " "
               << "dry_run=" << (dry_run ? "true" : "false")
               << " spread=" << spread_bps << " cancel_band=" << cancel_band
-              << " pair_size=" << pair_size << " max_pos=" << max_pos << '\n';
+              << " pair_size=" << pair_size << " max_pos=" << max_pos
+              << " hl_interval=" << env_or("HL_ORDER_INTERVAL_MS", "200") << "ms"
+              << " lt_interval=" << env_or("LIGHTER_ORDER_INTERVAL_MS", "500") << "ms\n";
 
     // --- Market Feed (WS for BBO reads) ---
     arb::MarketFeed::Config feed_config;
@@ -203,6 +205,10 @@ int main() {
     engine_config.hl_coin = "HYPE";
     engine_config.lighter_market_id = 24;
     engine_config.dry_run = dry_run;
+    engine_config.hl_order_interval_ms = static_cast<std::int64_t>(
+        std::stod(env_or("HL_ORDER_INTERVAL_MS", "200")));
+    engine_config.lighter_order_interval_ms = static_cast<std::int64_t>(
+        std::stod(env_or("LIGHTER_ORDER_INTERVAL_MS", "500")));
 
     // --- Trade Journal (append-only CSV, flushed with telemetry) ---
     const std::string journal_path = env_or("JOURNAL_PATH", "/home/ubuntu/lighter-hl-arb-cpp/trades.csv");

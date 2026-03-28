@@ -18,6 +18,8 @@ struct EngineConfig {
     std::string hl_coin {"HYPE"};
     std::int64_t lighter_market_id {24};
     bool dry_run {true};
+    std::int64_t hl_order_interval_ms {200};     // Min ms between HL place/cancel API calls
+    std::int64_t lighter_order_interval_ms {500}; // Min ms between Lighter hedge API calls
 };
 
 struct EventLog {
@@ -76,6 +78,11 @@ class MakerHedgeEngine {
     // Positive = long, negative = short. Updated on each fill.
     double hl_position_base_ {0.0};
     OrderPerfTrace perf_trace_;
+
+    // Rate limiting: track last API call timestamps (steady_clock ms)
+    std::int64_t last_hl_api_ms_ {0};
+    std::int64_t last_lighter_api_ms_ {0};
+    [[nodiscard]] std::int64_t steady_now_ms() const noexcept;
     
     // Returns true if current position exceeds max_position_usd.
     [[nodiscard]] bool position_limit_reached(double mid_price) const noexcept;
