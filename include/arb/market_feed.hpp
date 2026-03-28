@@ -157,7 +157,7 @@ class LighterPositionFeed {
     [[nodiscard]] bool is_connected() const noexcept;
     [[nodiscard]] bool is_subscribed() const noexcept;
     [[nodiscard]] bool wait_until_connected(int timeout_ms) const;
-    [[nodiscard]] std::optional<LighterPositionSnapshot> wait_for_position_change(double baseline_size, int timeout_ms) const;
+    [[nodiscard]] std::optional<LighterPositionSnapshot> wait_for_position_change(double baseline_size, int timeout_ms);
 
   private:
     void on_message(const std::string& msg);

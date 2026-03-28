@@ -558,7 +558,7 @@ bool LighterPositionFeed::wait_until_connected(int timeout_ms) const {
     return is_connected();
 }
 
-std::optional<LighterPositionSnapshot> LighterPositionFeed::wait_for_position_change(double baseline_size, int timeout_ms) const {
+std::optional<LighterPositionSnapshot> LighterPositionFeed::wait_for_position_change(double baseline_size, int timeout_ms) {
     std::unique_lock lock(mu_);
     const bool ready = cv_.wait_for(
         lock,
