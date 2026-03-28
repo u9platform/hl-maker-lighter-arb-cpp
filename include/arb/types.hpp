@@ -34,6 +34,12 @@ struct Bbo {
     }
 };
 
+struct LighterPositionSnapshot {
+    double size {0.0};
+    double avg_entry_price {0.0};
+    double position_value {0.0};
+};
+
 struct SpreadSnapshot {
     Bbo lighter;
     Bbo hl;

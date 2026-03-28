@@ -111,6 +111,7 @@ class LighterSignerHandle {
             throw std::runtime_error(dlerror());
         }
         create_client_ = load<CreateClientFn>("CreateClient");
+        create_auth_token_ = load<CreateAuthTokenFn>("CreateAuthToken");
         sign_create_order_ = load<SignCreateOrderFn>("SignCreateOrder");
         free_ = load<FreeFn>("Free");
     }
@@ -131,12 +132,14 @@ class LighterSignerHandle {
     }
 
     CreateClientFn create_client() const { return create_client_; }
+    CreateAuthTokenFn create_auth_token() const { return create_auth_token_; }
     SignCreateOrderFn sign_create_order() const { return sign_create_order_; }
     FreeFn free_fn() const { return free_; }
 
   private:
     void* handle_ {nullptr};
     CreateClientFn create_client_ {nullptr};
+    CreateAuthTokenFn create_auth_token_ {nullptr};
     SignCreateOrderFn sign_create_order_ {nullptr};
     FreeFn free_ {nullptr};
 };
@@ -434,6 +437,24 @@ void NativeLighterTrading::set_tx_transport(TxTransport transport) {
     tx_transport_ = std::move(transport);
 }
 
+void NativeLighterTrading::set_position_waiter(PositionWaiter waiter) {
+    position_waiter_ = std::move(waiter);
+}
+
+std::string NativeLighterTrading::create_auth_token(std::int64_t deadline_ms) {
+    ensure_client();
+    const auto* signer = static_cast<LighterSignerHandle*>(signer_lib_);
+    if (signer == nullptr) {
+        throw std::runtime_error("lighter signer not initialized");
+    }
+    const auto token = signer->create_auth_token()(deadline_ms, config_.api_key_index, config_.account_index);
+    const std::string err = decode_and_free(token.err, signer->free_fn());
+    if (!err.empty()) {
+        throw std::runtime_error(err);
+    }
+    return decode_and_free(token.str, signer->free_fn());
+}
+
 Bbo NativeLighterTrading::get_bbo(std::int64_t market_id) {
     const HttpResponse response = http_get(config_.api_url + "/api/v1/orderBookOrders?market_id=" + std::to_string(market_id) + "&limit=5");
     const std::regex ask_pattern(R"REGEX("asks":\[\{[^}]*"price":"([^"]+)")REGEX");
@@ -548,7 +569,7 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
         ? first_match_as_string(response_body, tx_hash_pattern)
         : tx_hash;
 
-    // Wait for predicted execution time, then verify position changed
+    // Wait for a position update event from the account WS feed, then verify position changed.
     const std::regex exec_time_pattern(R"REGEX("predicted_execution_time_ms":([0-9]+))REGEX");
     std::uint64_t wait_ms = 500;  // Default wait
     std::smatch exec_match;
@@ -560,51 +581,50 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
         }
     }
 
-    // Poll position up to 3 times with increasing delay
     bool fill_confirmed = false;
     double confirmed_size = 0.0;
     double fill_price = 0.0;
     int confirm_attempts = 0;
     std::uint64_t fill_confirm_latency_ns = 0;
-    for (int attempt = 0; attempt < 3; ++attempt) {
-        confirm_attempts = attempt + 1;
-        std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
+    std::optional<LighterPositionSnapshot> snap_after_opt;
+    if (position_waiter_) {
+        confirm_attempts = 1;
+        snap_after_opt = position_waiter_(pos_before, static_cast<int>(std::min(wait_ms + 1000, static_cast<std::uint64_t>(3000))));
+    }
+    if (!snap_after_opt.has_value()) {
+        confirm_attempts += 1;
         const auto snap_after = query_position_snapshot();
-        const double delta = std::abs(snap_after.size - pos_before);
-        if (delta > 0.001) {  // Position changed — fill confirmed
-            fill_confirmed = true;
-            confirmed_size = delta;
-            // Compute actual fill price from avg_entry change:
-            // new_value = old_value + fill_sz * fill_px
-            // fill_px = (new_pos * new_avg - old_pos * old_avg) / delta
-            const double value_before = std::abs(pos_before) * snap_before.avg_entry_price;
-            const double value_after = std::abs(snap_after.size) * snap_after.avg_entry_price;
-            if (delta > 0.0001) {
-                fill_price = std::abs(value_after - value_before) / delta;
-            }
-            fill_confirm_latency_ns = perf_now_ns() - http_ack_ns;
-            PerfCollector::instance().record_trade_path(
-                PerfMetric::LighterHttpAckToFillConfirmNs,
-                fill_confirm_latency_ns
-            );
-            std::cerr << "[lighter-debug] fill CONFIRMED: pos " << pos_before << " -> " << snap_after.size
-                      << " delta=" << delta << " fill_px=" << fill_price
-                      << " avg_entry " << snap_before.avg_entry_price << " -> " << snap_after.avg_entry_price
-                      << " (attempt " << (attempt + 1) << ")\n";
-            break;
+        if (std::abs(snap_after.size - pos_before) > 0.001) {
+            snap_after_opt = snap_after;
         }
-        std::cerr << "[lighter-debug] fill NOT confirmed yet, pos=" << snap_after.size
-                  << " (attempt " << (attempt + 1) << ", waiting " << wait_ms << "ms more)\n";
-        wait_ms = std::min(wait_ms * 2, static_cast<std::uint64_t>(2000));
     }
 
-    if (!fill_confirmed) {
+    if (snap_after_opt.has_value()) {
+        const auto& snap_after = *snap_after_opt;
+        const double delta = std::abs(snap_after.size - pos_before);
+        fill_confirmed = delta > 0.001;
+        confirmed_size = delta;
+        const double value_before = std::abs(pos_before) * snap_before.avg_entry_price;
+        const double value_after = std::abs(snap_after.size) * snap_after.avg_entry_price;
+        if (delta > 0.0001) {
+            fill_price = std::abs(value_after - value_before) / delta;
+        }
         fill_confirm_latency_ns = perf_now_ns() - http_ack_ns;
         PerfCollector::instance().record_trade_path(
             PerfMetric::LighterHttpAckToFillConfirmNs,
             fill_confirm_latency_ns
         );
-        std::cerr << "[lighter-debug] ⚠️ fill UNCONFIRMED after 3 attempts, tx=" << confirmed_tx_hash << "\n";
+        std::cerr << "[lighter-debug] fill CONFIRMED: pos " << pos_before << " -> " << snap_after.size
+                  << " delta=" << delta << " fill_px=" << fill_price
+                  << " avg_entry " << snap_before.avg_entry_price << " -> " << snap_after.avg_entry_price
+                  << " attempts=" << confirm_attempts << '\n';
+    } else {
+        fill_confirm_latency_ns = perf_now_ns() - http_ack_ns;
+        PerfCollector::instance().record_trade_path(
+            PerfMetric::LighterHttpAckToFillConfirmNs,
+            fill_confirm_latency_ns
+        );
+        std::cerr << "[lighter-debug] ⚠️ fill UNCONFIRMED after event wait, tx=" << confirmed_tx_hash << "\n";
     }
 
     return LighterIocAck {
@@ -621,7 +641,7 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     };
 }
 
-NativeLighterTrading::PositionSnapshot NativeLighterTrading::query_position_snapshot() const {
+LighterPositionSnapshot NativeLighterTrading::query_position_snapshot() const {
     const HttpResponse response = http_get(
         config_.api_url + "/api/v1/account?by=index&value=" + std::to_string(config_.account_index)
     );
@@ -640,7 +660,7 @@ NativeLighterTrading::PositionSnapshot NativeLighterTrading::query_position_snap
     const std::regex val_pattern(R"REGEX("position_value":"([^"]+)")REGEX");
 
     std::smatch match;
-    PositionSnapshot snap;
+    LighterPositionSnapshot snap;
     int sign = 0;
     double position = 0.0;
     if (std::regex_search(section, match, sign_pattern)) {

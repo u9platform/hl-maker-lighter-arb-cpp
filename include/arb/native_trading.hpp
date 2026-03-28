@@ -66,11 +66,14 @@ class NativeHyperliquidTrading final : public HyperliquidExchange {
 class NativeLighterTrading final : public LighterExchange {
   public:
     using TxTransport = std::function<std::string(std::uint8_t tx_type, const std::string& tx_info_json)>;
+    using PositionWaiter = std::function<std::optional<LighterPositionSnapshot>(double baseline_size, int timeout_ms)>;
 
     explicit NativeLighterTrading(LighterConfig config);
     ~NativeLighterTrading() override;
 
     void set_tx_transport(TxTransport transport);
+    void set_position_waiter(PositionWaiter waiter);
+    [[nodiscard]] std::string create_auth_token(std::int64_t deadline_ms);
 
     [[nodiscard]] Bbo get_bbo(std::int64_t market_id) override;
     [[nodiscard]] LighterIocAck place_ioc_order(const LighterIocRequest& request) override;
@@ -81,16 +84,12 @@ class NativeLighterTrading final : public LighterExchange {
     [[nodiscard]] std::int64_t scaled_size(double size) const;
     [[nodiscard]] std::uint32_t scaled_price(double price) const;
     [[nodiscard]] static std::string json_escape(const std::string& value);
-    struct PositionSnapshot {
-        double size {0.0};           // Signed position (negative = short)
-        double avg_entry_price {0.0};
-        double position_value {0.0};
-    };
-    [[nodiscard]] PositionSnapshot query_position_snapshot() const;
+    [[nodiscard]] LighterPositionSnapshot query_position_snapshot() const;
     [[nodiscard]] double query_position() const;
 
     LighterConfig config_;
     TxTransport tx_transport_;
+    PositionWaiter position_waiter_;
     void* signer_lib_ {nullptr};
     bool client_ready_ {false};
     int price_decimals_ {4};

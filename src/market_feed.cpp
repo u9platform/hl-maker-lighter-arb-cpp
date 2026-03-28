@@ -1,9 +1,11 @@
 #include "arb/market_feed.hpp"
 #include "arb/perf.hpp"
 
+#include <cmath>
 #include <iostream>
 #include <regex>
 #include <string>
+#include <thread>
 
 namespace arb {
 
@@ -89,54 +91,73 @@ bool parse_hl_bbo(const std::string& msg, double& bid, double& ask) {
     return bid > 0.0 && ask > 0.0;
 }
 
-// Parse Lighter orderbook — extract best bid and ask from the message.
-// Returns true if at least one side was parsed. bid/ask are set to 0.0 if not found.
-// Handles both snapshot and delta messages.
-bool parse_lighter_orderbook_sides(const std::string& msg, double& bid, double& ask) {
-    bid = 0.0;
-    ask = 0.0;
-    bool found_any = false;
+bool parse_lighter_ticker(const std::string& msg, double& bid, double& ask) {
+    const auto ticker_pos = msg.find("\"ticker\"");
+    if (ticker_pos == std::string::npos) return false;
 
-    // Extract best bid from "bids":[{"price":"X",...},...] — first element.
-    const auto bids_pos = msg.find("\"bids\"");
-    if (bids_pos != std::string::npos) {
-        // Check if bids array is not empty.
-        const auto bids_bracket = msg.find('[', bids_pos);
-        if (bids_bracket != std::string::npos && bids_bracket + 1 < msg.size() && msg[bids_bracket + 1] != ']') {
-            const auto bid_price_pos = msg.find("\"price\"", bids_bracket);
-            if (bid_price_pos != std::string::npos) {
-                auto bs = msg.find('"', bid_price_pos + 7);
-                if (bs != std::string::npos) {
-                    ++bs;
-                    auto be = msg.find('"', bs);
-                    if (be != std::string::npos) {
-                        try { bid = std::stod(msg.substr(bs, be - bs)); found_any = true; } catch (...) {}
-                    }
-                }
-            }
-        }
+    const auto ask_pos = msg.find("\"a\"", ticker_pos);
+    const auto bid_pos = msg.find("\"b\"", ticker_pos);
+    if (ask_pos == std::string::npos || bid_pos == std::string::npos) return false;
+
+    const auto ask_price_pos = msg.find("\"price\"", ask_pos);
+    const auto bid_price_pos = msg.find("\"price\"", bid_pos);
+    if (ask_price_pos == std::string::npos || bid_price_pos == std::string::npos) return false;
+
+    auto as = msg.find('"', ask_price_pos + 7);
+    auto bs = msg.find('"', bid_price_pos + 7);
+    if (as == std::string::npos || bs == std::string::npos) return false;
+    ++as;
+    ++bs;
+    const auto ae = msg.find('"', as);
+    const auto be = msg.find('"', bs);
+    if (ae == std::string::npos || be == std::string::npos) return false;
+
+    try {
+        ask = std::stod(msg.substr(as, ae - as));
+        bid = std::stod(msg.substr(bs, be - bs));
+    } catch (...) {
+        return false;
     }
 
-    // Extract best ask from "asks":[{"price":"X",...},...].
-    const auto asks_pos = msg.find("\"asks\"");
-    if (asks_pos != std::string::npos) {
-        const auto asks_bracket = msg.find('[', asks_pos);
-        if (asks_bracket != std::string::npos && asks_bracket + 1 < msg.size() && msg[asks_bracket + 1] != ']') {
-            const auto ask_price_pos = msg.find("\"price\"", asks_bracket);
-            if (ask_price_pos != std::string::npos) {
-                auto as = msg.find('"', ask_price_pos + 7);
-                if (as != std::string::npos) {
-                    ++as;
-                    auto ae = msg.find('"', as);
-                    if (ae != std::string::npos) {
-                        try { ask = std::stod(msg.substr(as, ae - as)); found_any = true; } catch (...) {}
-                    }
-                }
-            }
-        }
+    return bid > 0.0 && ask > 0.0;
+}
+
+std::optional<LighterPositionSnapshot> parse_lighter_position_update(const std::string& msg, int market_index) {
+    if (msg.find("\"account_all_positions:\"") == std::string::npos
+        || msg.find("\"positions\"") == std::string::npos) {
+        return std::nullopt;
     }
 
-    return found_any;
+    const std::string market_key = "\"" + std::to_string(market_index) + "\":{";
+    const auto market_pos = msg.find(market_key);
+    if (market_pos == std::string::npos) {
+        return LighterPositionSnapshot {};
+    }
+
+    const std::string section = msg.substr(market_pos, 512);
+    const std::regex sign_pattern(R"REGEX("sign":(-?[0-9]+))REGEX");
+    const std::regex pos_pattern(R"REGEX("position":"([^"]+)")REGEX");
+    const std::regex avg_pattern(R"REGEX("avg_entry_price":"([^"]+)")REGEX");
+    const std::regex val_pattern(R"REGEX("position_value":"([^"]+)")REGEX");
+
+    std::smatch match;
+    int sign = 0;
+    double position = 0.0;
+    LighterPositionSnapshot snap;
+    if (std::regex_search(section, match, sign_pattern)) {
+        sign = std::stoi(match[1].str());
+    }
+    if (std::regex_search(section, match, pos_pattern)) {
+        position = std::stod(match[1].str());
+    }
+    snap.size = static_cast<double>(sign) * position;
+    if (std::regex_search(section, match, avg_pattern)) {
+        snap.avg_entry_price = std::stod(match[1].str());
+    }
+    if (std::regex_search(section, match, val_pattern)) {
+        snap.position_value = std::stod(match[1].str());
+    }
+    return snap;
 }
 
 // Parse HL userFills WS message for fill events.
@@ -373,29 +394,21 @@ void MarketFeed::on_lighter_message(const std::string& msg) {
         return;
     }
 
-    // Parse orderbook.
-    if (msg.find("\"order_book\"") != std::string::npos) {
-        if (!lighter_subscribed_.load(std::memory_order_relaxed) &&
-            msg.find("\"subscribed/order_book\"") != std::string::npos) {
+    if (msg.find("\"ticker\"") != std::string::npos) {
+        if (!lighter_subscribed_.load(std::memory_order_relaxed)) {
             lighter_subscribed_.store(true, std::memory_order_release);
-            std::cerr << "[lighter-ws] subscribed to order_book:" << config_.lighter_market_id << '\n';
+            std::cerr << "[lighter-ws] subscribed to ticker:" << config_.lighter_market_id << '\n';
         }
 
-        double bid = 0.0, ask = 0.0;
-        if (parse_lighter_orderbook_sides(msg, bid, ask)) {
-            // For delta updates, only one side may be present.
-            // Merge with existing BBO.
-            const Bbo current = lighter_bbo_.load();
-            if (bid <= 0.0) bid = current.bid;
-            if (ask <= 0.0) ask = current.ask;
-            if (bid > 0.0 && ask > 0.0) {
-                lighter_bbo_.store(bid, ask);
-                PerfCollector::instance().record_hot_path(
-                    PerfMetric::LighterMarketLocalRxToBboUpdateNs,
-                    perf_now_ns() - local_rx_ns
-                );
-                if (on_update_) on_update_();
-            }
+        double bid = 0.0;
+        double ask = 0.0;
+        if (parse_lighter_ticker(msg, bid, ask)) {
+            lighter_bbo_.store(bid, ask);
+            PerfCollector::instance().record_hot_path(
+                PerfMetric::LighterMarketLocalRxToBboUpdateNs,
+                perf_now_ns() - local_rx_ns
+            );
+            if (on_update_) on_update_();
         }
     }
 }
@@ -408,7 +421,7 @@ void MarketFeed::subscribe_hl() {
 }
 
 void MarketFeed::subscribe_lighter() {
-    const std::string sub = "{\"type\":\"subscribe\",\"channel\":\"order_book/" +
+    const std::string sub = "{\"type\":\"subscribe\",\"channel\":\"ticker/" +
         std::to_string(config_.lighter_market_id) + "\"}";
     lighter_ws_->send(sub);
 }
@@ -494,6 +507,107 @@ void HlFillFeed::on_message(const std::string& msg) {
 void HlFillFeed::subscribe() {
     const std::string sub = "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"userFills\",\"user\":\"" +
         config_.user_address + "\"}}";
+    ws_->send(sub);
+}
+
+LighterPositionFeed::LighterPositionFeed(Config config) : config_(std::move(config)) {}
+
+LighterPositionFeed::~LighterPositionFeed() {
+    stop();
+}
+
+void LighterPositionFeed::start() {
+    WsClient::Config ws_cfg;
+    ws_cfg.host = config_.ws_host;
+    ws_cfg.port = "443";
+    ws_cfg.path = config_.ws_path;
+    ws_cfg.ping_interval_sec = 15;
+
+    ws_ = std::make_unique<WsClient>(ws_cfg);
+    ws_->set_on_message([this](const std::string& msg) { on_message(msg); });
+    ws_->set_on_disconnect([this](const std::string& reason) {
+        std::cerr << "[lighter-pos] disconnected: " << reason << '\n';
+        subscribed_.store(false, std::memory_order_release);
+        subscribe();
+        cv_.notify_all();
+    });
+    subscribe();
+    ws_->connect();
+}
+
+void LighterPositionFeed::stop() {
+    if (ws_) ws_->close();
+}
+
+bool LighterPositionFeed::is_connected() const noexcept {
+    return ws_ && ws_->is_connected();
+}
+
+bool LighterPositionFeed::is_subscribed() const noexcept {
+    return is_connected() && subscribed_.load(std::memory_order_relaxed);
+}
+
+bool LighterPositionFeed::wait_until_connected(int timeout_ms) const {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (is_connected()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return is_connected();
+}
+
+std::optional<LighterPositionSnapshot> LighterPositionFeed::wait_for_position_change(double baseline_size, int timeout_ms) const {
+    std::unique_lock lock(mu_);
+    const bool ready = cv_.wait_for(
+        lock,
+        std::chrono::milliseconds(timeout_ms),
+        [&] {
+            return latest_.has_value()
+                && std::abs(latest_->size - baseline_size) > 0.001;
+        }
+    );
+    if (!ready) {
+        return std::nullopt;
+    }
+    return latest_;
+}
+
+void LighterPositionFeed::on_message(const std::string& msg) {
+    if (msg.find("\"connected\"") != std::string::npos && !subscribed_.load(std::memory_order_relaxed)) {
+        subscribe();
+        return;
+    }
+
+    if (msg.find("\"ping\"") != std::string::npos) {
+        ws_->send("{\"type\":\"pong\"}");
+        return;
+    }
+
+    if (!subscribed_.load(std::memory_order_relaxed)
+        && msg.find("\"subscribed/account_all_positions\"") != std::string::npos) {
+        subscribed_.store(true, std::memory_order_release);
+        std::cerr << "[lighter-pos] subscribed to account_all_positions:" << config_.account_index << '\n';
+    }
+
+    const auto snap = parse_lighter_position_update(msg, config_.market_index);
+    if (!snap.has_value()) {
+        return;
+    }
+
+    {
+        std::lock_guard lock(mu_);
+        latest_ = *snap;
+        ++version_;
+    }
+    cv_.notify_all();
+}
+
+void LighterPositionFeed::subscribe() {
+    const std::string sub = "{\"type\":\"subscribe\",\"channel\":\"account_all_positions/"
+        + std::to_string(config_.account_index)
+        + "\",\"auth\":\"" + config_.auth_token + "\"}";
     ws_->send(sub);
 }
 

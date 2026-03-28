@@ -30,6 +30,7 @@ namespace {
 #endif
 
 std::atomic<bool> g_running {true};
+std::atomic<std::uint64_t> g_event_seq {0};
 std::mutex g_cv_mu;
 std::condition_variable g_cv;
 
@@ -50,6 +51,11 @@ std::queue<FillEvent> g_fill_queue;
 void signal_handler(int /*sig*/) {
     g_running.store(false, std::memory_order_release);
     g_cv.notify_all();
+}
+
+void publish_event() {
+    g_event_seq.fetch_add(1, std::memory_order_release);
+    g_cv.notify_one();
 }
 
 std::string env_or(const char* name, const std::string& fallback) {
@@ -76,6 +82,11 @@ int env_int(const char* name, int fallback) {
     const char* val = std::getenv(name);
     if (val == nullptr) return fallback;
     try { return std::stoi(val); } catch (...) { return fallback; }
+}
+
+std::int64_t current_timestamp_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
 std::string timestamp_str() {
@@ -148,6 +159,22 @@ int main() {
         .api_key_index = lighter_api_key_index,
         .market_index = 24,
     });
+    arb::LighterPositionFeed lighter_position_feed({
+        .account_index = lighter_account_index,
+        .market_index = 24,
+        .auth_token = lighter_native.create_auth_token(current_timestamp_ms() + 24LL * 60LL * 60LL * 1000LL),
+    });
+    lighter_position_feed.start();
+    if (lighter_position_feed.wait_until_connected(2000)) {
+        lighter_native.set_position_waiter(
+            [&lighter_position_feed](double baseline_size, int timeout_ms) {
+                return lighter_position_feed.wait_for_position_change(baseline_size, timeout_ms);
+            }
+        );
+        std::cerr << "[main] lighter position confirmation=ws_account_all_positions\n";
+    } else {
+        std::cerr << "[main] WARNING: lighter position feed unavailable, falling back to direct account query\n";
+    }
     arb::LighterWsSendTxTransport lighter_ws_sendtx;
     lighter_ws_sendtx.start();
     if (lighter_ws_sendtx.wait_until_connected(2000)) {
@@ -205,7 +232,7 @@ int main() {
     auto start_time = std::chrono::steady_clock::now();
 
     // Wake strategy thread on every BBO update.
-    feed.set_on_update([&] { g_cv.notify_one(); });
+    feed.set_on_update([&] { publish_event(); });
 
     // --- Fill Feed ---
     std::unique_ptr<arb::HlFillFeed> fill_feed;
@@ -221,7 +248,7 @@ int main() {
                 std::lock_guard lock(g_fill_mu);
                 g_fill_queue.push(FillEvent {coin, price, size, is_buy, oid, fee, arb::perf_now_ns()});
             }
-            g_cv.notify_one();  // Wake main loop immediately.
+            publish_event();
         });
 
         // BUG FIX 2: Set disconnect callback to immediately activate kill switch
@@ -263,12 +290,22 @@ int main() {
 
     // --- Strategy Loop ---
     uint64_t last_log_tick = 0;
+    std::uint64_t last_seen_event_seq = g_event_seq.load(std::memory_order_acquire);
+    auto next_housekeeping = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     while (g_running.load(std::memory_order_relaxed)) {
         {
             std::unique_lock lock(g_cv_mu);
-            g_cv.wait_for(lock, std::chrono::milliseconds(100));
+            g_cv.wait_until(lock, next_housekeeping, [&] {
+                return !g_running.load(std::memory_order_relaxed)
+                    || g_event_seq.load(std::memory_order_acquire) != last_seen_event_seq;
+            });
         }
         if (!g_running.load(std::memory_order_relaxed)) break;
+        last_seen_event_seq = g_event_seq.load(std::memory_order_acquire);
+        const auto now_steady = std::chrono::steady_clock::now();
+        if (now_steady >= next_housekeeping) {
+            next_housekeeping = now_steady + std::chrono::seconds(1);
+        }
 
         // --- Process queued fill events on main thread (thread-safe) ---
         {
@@ -304,7 +341,7 @@ int main() {
 
         // BUG FIX 2: Check fill feed status every tick (not just in telemetry)
         // Use is_subscribed() instead of is_connected() to ensure we're actually receiving fills
-        const bool fills_subscribed = fill_feed && fill_feed->is_subscribed();
+        const bool fills_subscribed = !fill_feed || fill_feed->is_subscribed();
         if (!fills_subscribed && !risk.kill_switch_active()) {
             risk.activate_kill_switch("fill feed not subscribed");
             std::cerr << "[risk] " << timestamp_str() << " KILL SWITCH: fill feed not subscribed\n";
@@ -350,7 +387,7 @@ int main() {
                 std::chrono::steady_clock::now() - start_time).count();
 
             // BUG FIX 2: Use is_subscribed() instead of is_connected() for more accurate status
-            const bool fills_subscribed = fill_feed && fill_feed->is_subscribed();
+            const bool fills_subscribed = !fill_feed || fill_feed->is_subscribed();
             std::cerr << "[telem] " << timestamp_str()
                       << " ticks=" << tick_count << " trades=" << trade_count
                       << " uptime=" << uptime_s << "s"
@@ -374,6 +411,7 @@ int main() {
     // --- Shutdown ---
     std::cerr << "\n[main] shutting down...\n";
     journal.flush();
+    lighter_position_feed.stop();
     lighter_ws_sendtx.stop();
     hl_ws_post.stop();
     feed.stop();

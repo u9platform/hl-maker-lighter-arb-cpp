@@ -5,9 +5,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 
 namespace arb {
@@ -131,6 +133,42 @@ class HlFillFeed {
     std::unique_ptr<WsClient> ws_;
     FillCallback on_fill_;
     DisconnectCallback on_disconnect_;
+    std::atomic<bool> subscribed_ {false};
+};
+
+class LighterPositionFeed {
+  public:
+    struct Config {
+        std::string ws_host {"mainnet.zklighter.elliot.ai"};
+        std::string ws_path {"/stream"};
+        std::int64_t account_index {0};
+        int market_index {24};
+        std::string auth_token;
+    };
+
+    explicit LighterPositionFeed(Config config);
+    ~LighterPositionFeed();
+
+    LighterPositionFeed(const LighterPositionFeed&) = delete;
+    LighterPositionFeed& operator=(const LighterPositionFeed&) = delete;
+
+    void start();
+    void stop();
+    [[nodiscard]] bool is_connected() const noexcept;
+    [[nodiscard]] bool is_subscribed() const noexcept;
+    [[nodiscard]] bool wait_until_connected(int timeout_ms) const;
+    [[nodiscard]] std::optional<LighterPositionSnapshot> wait_for_position_change(double baseline_size, int timeout_ms) const;
+
+  private:
+    void on_message(const std::string& msg);
+    void subscribe();
+
+    Config config_;
+    std::unique_ptr<WsClient> ws_;
+    mutable std::mutex mu_;
+    std::condition_variable cv_;
+    std::optional<LighterPositionSnapshot> latest_;
+    std::uint64_t version_ {0};
     std::atomic<bool> subscribed_ {false};
 };
 
