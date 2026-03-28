@@ -111,14 +111,17 @@ class HlFillFeed {
     };
 
     using FillCallback = std::function<void(const std::string& coin, double price, double size, bool is_buy, const std::string& oid)>;
+    using DisconnectCallback = std::function<void(const std::string& reason)>;
 
     explicit HlFillFeed(Config config);
     ~HlFillFeed();
 
     void set_on_fill(FillCallback cb);
+    void set_on_disconnect(DisconnectCallback cb);
     void start();
     void stop();
     [[nodiscard]] bool is_connected() const noexcept;
+    [[nodiscard]] bool is_subscribed() const noexcept;
 
   private:
     void on_message(const std::string& msg);
@@ -127,6 +130,7 @@ class HlFillFeed {
     Config config_;
     std::unique_ptr<WsClient> ws_;
     FillCallback on_fill_;
+    DisconnectCallback on_disconnect_;
     std::atomic<bool> subscribed_ {false};
 };
 

@@ -33,7 +33,18 @@ std::vector<EventLog> MakerHedgeEngine::on_market_data(std::int64_t now_ms) {
     return execute_action(action, snapshot);
 }
 
-std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot) {
+std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, const std::string& oid) {
+    // BUG FIX 3: Check if this fill belongs to any recently placed order, not just the current active one.
+    // This handles the race condition where a cancel is sent and active_hl_oid_ is reset,
+    // but the fill message arrives after that reset.
+    if (recently_placed_oids_.find(oid) == recently_placed_oids_.end()) {
+        // This fill doesn't belong to any of our recent orders, ignore it
+        return {};
+    }
+    
+    // Remove from tracking set since we've processed this fill
+    recently_placed_oids_.erase(oid);
+    
     const Action action = strategy_.on_hl_maker_fill(fill_price, fill_size_base, snapshot);
     return execute_action(action, snapshot);
 }
@@ -72,6 +83,8 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             });
             if (ack.ok) {
                 active_hl_oid_ = ack.oid;
+                // BUG FIX 3: Track this OID in the recently placed set to handle fill race conditions
+                recently_placed_oids_.insert(ack.oid);
                 events.push_back(EventLog {.message = "placed hl maker oid=" + ack.oid});
             } else {
                 events.push_back(EventLog {.message = "hl maker placement failed: " + ack.message});
@@ -86,6 +99,11 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             const HlCancelAck ack = hl_.cancel_order(config_.hl_coin, *active_hl_oid_, config_.dry_run);
             events.push_back(EventLog {.message = ack.ok ? "cancelled hl maker oid=" + ack.oid
                                                         : "hl cancel failed: " + ack.message});
+            
+            // BUG FIX 3: Keep the OID in recently_placed_oids_ even after cancel.
+            // This allows us to still match fills that arrive after the cancel was sent
+            // but before the fill message was received (race condition).
+            // The OID will be removed when the fill is actually processed.
             active_hl_oid_.reset();
             return events;
         }

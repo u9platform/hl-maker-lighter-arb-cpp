@@ -97,7 +97,7 @@ void test_sends_lighter_hedge_after_hl_fill() {
     const auto initial_logs = engine.on_market_data(1000);
     require(!initial_logs.empty(), "expected initial placement logs");
     const arb::SpreadSnapshot snapshot = engine.collect_snapshot();
-    const auto logs = engine.on_hl_fill(10.0, 2.5, snapshot);
+    const auto logs = engine.on_hl_fill(10.0, 2.5, snapshot, "oid-1");
 
     require(lighter.ioc_count == 1, "expected one lighter IOC");
     require(!logs.empty(), "expected hedge log");
@@ -114,7 +114,7 @@ void test_hedge_reject_triggers_hl_unwind() {
     const auto initial_logs = engine.on_market_data(1000);
     require(!initial_logs.empty(), "expected initial placement logs");
     const arb::SpreadSnapshot snapshot = engine.collect_snapshot();
-    const auto hedge_logs = engine.on_hl_fill(10.0, 2.5, snapshot);
+    const auto hedge_logs = engine.on_hl_fill(10.0, 2.5, snapshot, "oid-1");
     require(!hedge_logs.empty(), "expected hedge logs");
     const auto logs = engine.on_lighter_hedge_reject();
 

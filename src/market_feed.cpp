@@ -382,6 +382,10 @@ void HlFillFeed::set_on_fill(FillCallback cb) {
     on_fill_ = std::move(cb);
 }
 
+void HlFillFeed::set_on_disconnect(DisconnectCallback cb) {
+    on_disconnect_ = std::move(cb);
+}
+
 void HlFillFeed::start() {
     WsClient::Config ws_cfg;
     ws_cfg.host = config_.ws_host;
@@ -394,7 +398,16 @@ void HlFillFeed::start() {
     ws_->set_on_disconnect([this](const std::string& reason) {
         std::cerr << "[hl-fills] disconnected: " << reason << ", will resubscribe on reconnect\n";
         subscribed_.store(false, std::memory_order_release);
+        // Notify main thread to activate kill switch immediately
+        if (on_disconnect_) {
+            on_disconnect_(reason);
+        }
     });
+    
+    // BUG FIX 1: Queue the subscribe message before connecting (like MarketFeed does)
+    // This ensures that the subscription will be sent as soon as WS handshake completes,
+    // even after reconnections when HL WS doesn't send initial messages to trigger on_message()
+    subscribe();
     ws_->connect();
 }
 
@@ -406,14 +419,20 @@ bool HlFillFeed::is_connected() const noexcept {
     return ws_ && ws_->is_connected();
 }
 
+bool HlFillFeed::is_subscribed() const noexcept {
+    return is_connected() && subscribed_.load(std::memory_order_relaxed);
+}
+
 void HlFillFeed::on_message(const std::string& msg) {
+    // BUG FIX 1: Check for subscription response to mark as subscribed
     if (!subscribed_.load(std::memory_order_relaxed)) {
         if (msg.find("subscriptionResponse") != std::string::npos) {
             subscribed_.store(true, std::memory_order_release);
             std::cerr << "[hl-fills] subscribed to userFills\n";
             return;
         }
-        subscribe();
+        // Note: We no longer call subscribe() here because it's already queued in start()
+        // This prevents the old problem where on_message() might never be called after reconnect
         return;
     }
 

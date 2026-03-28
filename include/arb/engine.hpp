@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace arb {
@@ -30,7 +31,7 @@ class MakerHedgeEngine {
 
     [[nodiscard]] SpreadSnapshot collect_snapshot() const;
     [[nodiscard]] std::vector<EventLog> on_market_data(std::int64_t now_ms);
-    [[nodiscard]] std::vector<EventLog> on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot);
+    [[nodiscard]] std::vector<EventLog> on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, const std::string& oid);
     [[nodiscard]] std::vector<EventLog> on_lighter_hedge_reject();
     void on_lighter_hedge_fill(double fill_price);
 
@@ -45,6 +46,11 @@ class MakerHedgeEngine {
     LighterExchange& lighter_;
     HlMakerLighterHedger strategy_;
     std::optional<std::string> active_hl_oid_;
+    
+    // BUG FIX 3: Track recently placed OIDs to handle race condition between
+    // cancel and fill messages. Prevents fills from being ignored when they
+    // arrive after the engine has already reset active_hl_oid_ due to cancel.
+    std::unordered_set<std::string> recently_placed_oids_;
 };
 
 }  // namespace arb

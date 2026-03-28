@@ -176,6 +176,20 @@ int main() {
             }
             g_cv.notify_one();  // Wake main loop immediately.
         });
+
+        // BUG FIX 2: Set disconnect callback to immediately activate kill switch
+        fill_feed->set_on_disconnect([&](const std::string& reason) {
+            if (!risk.kill_switch_active()) {
+                risk.activate_kill_switch("fill feed disconnected: " + reason);
+                std::cerr << "[risk] " << timestamp_str() << " KILL SWITCH: fill feed disconnect - " << reason << '\n';
+                // Cancel any active maker order immediately
+                const auto& active = engine.active_hl_oid();
+                if (active.has_value()) {
+                    hl_exchange.cancel_order("HYPE", *active, dry_run);
+                    std::cerr << "[risk] cancelled active HL order due to fill feed disconnect\n";
+                }
+            }
+        });
     }
 
     // --- Start feeds ---
@@ -220,13 +234,13 @@ int main() {
                           << " " << fill.coin << " px=" << fill.price << " sz=" << fill.size
                           << " " << (fill.is_buy ? "BUY" : "SELL") << " oid=" << fill.oid << '\n';
 
-                const auto& active_oid = engine.active_hl_oid();
-                if (active_oid.has_value() && *active_oid == fill.oid) {
-                    const auto fill_snap = feed.snapshot();
-                    const auto logs = engine.on_hl_fill(fill.price, fill.size, fill_snap);
-                    for (const auto& log : logs) {
-                        std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
-                    }
+                // BUG FIX 3: Pass the OID to engine so it can handle the race condition
+                const auto fill_snap = feed.snapshot();
+                const auto logs = engine.on_hl_fill(fill.price, fill.size, fill_snap, fill.oid);
+                for (const auto& log : logs) {
+                    std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
+                }
+                if (!logs.empty()) {
                     ++trade_count;
                 }
             }
@@ -239,6 +253,25 @@ int main() {
 
         // Skip until both venues have valid data.
         if (snap.hl.bid <= 0.0 || snap.lighter.bid <= 0.0) continue;
+
+        // BUG FIX 2: Check fill feed status every tick (not just in telemetry)
+        // Use is_subscribed() instead of is_connected() to ensure we're actually receiving fills
+        const bool fills_subscribed = fill_feed && fill_feed->is_subscribed();
+        if (!fills_subscribed && !risk.kill_switch_active()) {
+            risk.activate_kill_switch("fill feed not subscribed");
+            std::cerr << "[risk] " << timestamp_str() << " KILL SWITCH: fill feed not subscribed\n";
+            // Cancel any active maker order immediately
+            const auto& active = engine.active_hl_oid();
+            if (active.has_value()) {
+                hl_exchange.cancel_order("HYPE", *active, dry_run);
+                std::cerr << "[risk] cancelled active HL order due to fill feed not subscribed\n";
+            }
+        } else if (fills_subscribed && risk.kill_switch_active() && 
+                   (risk.kill_switch_reason() == "fill feed not subscribed" || 
+                    risk.kill_switch_reason().find("fill feed disconnected") != std::string::npos)) {
+            risk.reset_kill_switch();
+            std::cerr << "[risk] " << timestamp_str() << " kill switch reset (fill feed reconnected and subscribed)\n";
+        }
 
         // Stale quote kill switch.
         if (snap.lighter.quote_age_ms > 5000 || snap.hl.quote_age_ms > 5000) {
@@ -267,7 +300,8 @@ int main() {
             const auto uptime_s = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - start_time).count();
 
-            const bool fills_ok = fill_feed && fill_feed->is_connected();
+            // BUG FIX 2: Use is_subscribed() instead of is_connected() for more accurate status
+            const bool fills_subscribed = fill_feed && fill_feed->is_subscribed();
             std::cerr << "[telem] " << timestamp_str()
                       << " ticks=" << tick_count << " trades=" << trade_count
                       << " uptime=" << uptime_s << "s"
@@ -275,22 +309,10 @@ int main() {
                       << " hl=" << snap.hl.bid << "/" << snap.hl.ask
                       << " lt=" << snap.lighter.bid << "/" << snap.lighter.ask
                       << " state=" << static_cast<int>(engine.strategy().state())
-                      << " fills_ws=" << (fills_ok ? "OK" : "DOWN") << '\n';
+                      << " fills_ws=" << (fills_subscribed ? "SUBSCRIBED" : "NOT_SUBSCRIBED") << '\n';
 
-            // Safety: if fill feed is down, activate kill switch to prevent new orders
-            // (fills won't be detected → naked positions)
-            if (!fills_ok && !risk.kill_switch_active()) {
-                risk.activate_kill_switch("fill feed disconnected");
-                std::cerr << "[risk] " << timestamp_str() << " KILL SWITCH: fill feed down, cancelling active orders\n";
-                // Cancel any active maker order
-                const auto& active = engine.active_hl_oid();
-                if (active.has_value()) {
-                    hl_exchange.cancel_order("HYPE", *active, dry_run);
-                }
-            } else if (fills_ok && risk.kill_switch_active() && risk.kill_switch_reason() == "fill feed disconnected") {
-                risk.reset_kill_switch();
-                std::cerr << "[risk] " << timestamp_str() << " kill switch reset (fill feed reconnected)\n";
-            }
+            // Note: Kill switch logic for fill feed is now handled every tick above,
+            // so we don't need the old lazy check here anymore.
         }
     }
 
