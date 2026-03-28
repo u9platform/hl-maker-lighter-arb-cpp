@@ -90,6 +90,27 @@ void test_cancels_when_spread_reverts_below_band() {
     require(!engine.active_hl_oid().has_value(), "expected active oid cleared after cancel");
 }
 
+void test_cancel_not_blocked_by_recent_place_rate_limit() {
+    FakeHlExchange hl;
+    FakeLighterExchange lighter;
+    arb::EngineConfig config;
+    config.strategy.spread_bps = 2.0;
+    config.strategy.cancel_band_bps = 0.5;
+    config.hl_order_interval_ms = 200;
+    arb::MakerHedgeEngine engine(config, hl, lighter);
+
+    const auto initial_logs = engine.on_market_data(1000);
+    require(!initial_logs.empty(), "expected initial placement logs");
+    require(hl.place_count == 1, "expected one HL maker placement");
+
+    lighter.bbo = {.bid = 10.003, .ask = 10.007, .quote_age_ms = 1};
+    hl.bbo = {.bid = 10.0, .ask = 10.01, .quote_age_ms = 1};
+
+    const auto logs = engine.on_market_data(1100);
+    require(hl.cancel_count == 1, "expected cancel to bypass recent place limiter");
+    require(!logs.empty(), "expected cancel log");
+}
+
 void test_sends_lighter_hedge_after_hl_fill() {
     FakeHlExchange hl;
     FakeLighterExchange lighter;
@@ -151,6 +172,7 @@ int main() {
     const std::vector<void (*)()> tests {
         test_places_maker_when_spread_reaches_threshold,
         test_cancels_when_spread_reverts_below_band,
+        test_cancel_not_blocked_by_recent_place_rate_limit,
         test_sends_lighter_hedge_after_hl_fill,
         test_hedge_reject_triggers_hl_unwind,
         test_maker_price_uses_lighter_anchor_with_hl_post_only_clamp,

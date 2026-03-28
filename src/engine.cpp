@@ -55,6 +55,12 @@ bool MakerHedgeEngine::position_limit_reached(double mid_price) const noexcept {
 
 std::vector<EventLog> MakerHedgeEngine::on_market_data(std::int64_t now_ms) {
     const SpreadSnapshot snapshot = collect_snapshot();
+    if (deferred_hl_action_.has_value()) {
+        auto deferred_logs = execute_deferred_hl_action(now_ms, snapshot);
+        if (!deferred_logs.empty()) {
+            return deferred_logs;
+        }
+    }
     PerfCollector::instance().record_hot_path(
         PerfMetric::CrossVenueAlignmentMs,
         static_cast<std::uint64_t>(std::llabs(snapshot.hl.quote_age_ms - snapshot.lighter.quote_age_ms))
@@ -359,6 +365,10 @@ double MakerHedgeEngine::hl_position_base() const noexcept {
     return hl_position_base_;
 }
 
+std::optional<std::int64_t> MakerHedgeEngine::next_retry_steady_ms() const noexcept {
+    return next_retry_steady_ms_;
+}
+
 void MakerHedgeEngine::set_hl_position(double base_size) noexcept {
     hl_position_base_ = base_size;
 }
@@ -386,13 +396,16 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
                     }
                 }
             }
-            // Rate limit: skip if too soon since last HL API call
             {
                 const auto now = steady_now_ms();
-                if (now - last_hl_api_ms_ < config_.hl_order_interval_ms) {
-                    return events;  // Throttled — skip this tick
+                if (const auto retry_at = hl_place_retry_at_ms(now); retry_at.has_value()) {
+                    deferred_hl_action_ = DeferredHlAction {.action = action};
+                    next_retry_steady_ms_ = retry_at;
+                    return events;
                 }
-                last_hl_api_ms_ = now;
+                last_hl_place_ms_ = now;
+                next_retry_steady_ms_.reset();
+                deferred_hl_action_.reset();
             }
             const std::uint64_t hl_send_ns = perf_now_ns();
             perf_trace_.hl_send_ns = hl_send_ns;
@@ -430,13 +443,16 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             return events;
         }
         case ActionType::CancelHlMaker: {
-            // Rate limit: skip if too soon since last HL API call
             {
                 const auto now = steady_now_ms();
-                if (now - last_hl_api_ms_ < config_.hl_order_interval_ms) {
-                    return events;  // Throttled — skip this tick
+                if (const auto retry_at = hl_cancel_retry_at_ms(now); retry_at.has_value()) {
+                    deferred_hl_action_ = DeferredHlAction {.action = action};
+                    next_retry_steady_ms_ = retry_at;
+                    return events;
                 }
-                last_hl_api_ms_ = now;
+                last_hl_cancel_ms_ = now;
+                next_retry_steady_ms_.reset();
+                deferred_hl_action_.reset();
             }
             if (!active_hl_oid_.has_value()) {
                 events.push_back(EventLog {.message = "cancel requested with no active oid"});
@@ -516,6 +532,36 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
     }
 
     return events;
+}
+
+std::vector<EventLog> MakerHedgeEngine::execute_deferred_hl_action(std::int64_t now_ms, const SpreadSnapshot& snapshot) {
+    if (!deferred_hl_action_.has_value()) {
+        return {};
+    }
+    if (next_retry_steady_ms_.has_value() && now_ms < *next_retry_steady_ms_) {
+        return {};
+    }
+
+    const Action action = deferred_hl_action_->action;
+    deferred_hl_action_.reset();
+    next_retry_steady_ms_.reset();
+    return execute_action(action, snapshot);
+}
+
+std::optional<std::int64_t> MakerHedgeEngine::hl_place_retry_at_ms(std::int64_t now_ms) const noexcept {
+    const std::int64_t elapsed = now_ms - last_hl_place_ms_;
+    if (elapsed >= config_.hl_order_interval_ms) {
+        return std::nullopt;
+    }
+    return last_hl_place_ms_ + config_.hl_order_interval_ms;
+}
+
+std::optional<std::int64_t> MakerHedgeEngine::hl_cancel_retry_at_ms(std::int64_t now_ms) const noexcept {
+    const std::int64_t elapsed = now_ms - last_hl_cancel_ms_;
+    if (elapsed >= config_.hl_order_interval_ms) {
+        return std::nullopt;
+    }
+    return last_hl_cancel_ms_ + config_.hl_order_interval_ms;
 }
 
 }  // namespace arb

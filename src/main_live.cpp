@@ -349,9 +349,16 @@ int main() {
     std::uint64_t last_seen_event_seq = g_event_seq.load(std::memory_order_acquire);
     auto next_housekeeping = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     while (g_running.load(std::memory_order_relaxed)) {
+        auto wake_deadline = next_housekeeping;
+        if (const auto retry_ms = engine.next_retry_steady_ms(); retry_ms.has_value()) {
+            wake_deadline = std::min(
+                wake_deadline,
+                std::chrono::steady_clock::time_point {std::chrono::milliseconds {*retry_ms}}
+            );
+        }
         {
             std::unique_lock lock(g_cv_mu);
-            g_cv.wait_until(lock, next_housekeeping, [&] {
+            g_cv.wait_until(lock, wake_deadline, [&] {
                 return !g_running.load(std::memory_order_relaxed)
                     || g_event_seq.load(std::memory_order_acquire) != last_seen_event_seq;
             });

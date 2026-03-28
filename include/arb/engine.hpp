@@ -44,6 +44,7 @@ class MakerHedgeEngine {
     [[nodiscard]] const std::optional<std::string>& active_hl_oid() const noexcept;
     [[nodiscard]] const HlMakerLighterHedger& strategy() const noexcept;
     [[nodiscard]] double hl_position_base() const noexcept;
+    [[nodiscard]] std::optional<std::int64_t> next_retry_steady_ms() const noexcept;
     void set_hl_position(double base_size) noexcept;
 
   private:
@@ -60,6 +61,9 @@ class MakerHedgeEngine {
     };
 
     [[nodiscard]] std::vector<EventLog> execute_action(const Action& action, const SpreadSnapshot& snapshot);
+    [[nodiscard]] std::vector<EventLog> execute_deferred_hl_action(std::int64_t now_ms, const SpreadSnapshot& snapshot);
+    [[nodiscard]] std::optional<std::int64_t> hl_place_retry_at_ms(std::int64_t now_ms) const noexcept;
+    [[nodiscard]] std::optional<std::int64_t> hl_cancel_retry_at_ms(std::int64_t now_ms) const noexcept;
 
     EngineConfig config_;
     HyperliquidExchange& hl_;
@@ -81,8 +85,14 @@ class MakerHedgeEngine {
     OrderPerfTrace perf_trace_;
 
     // Rate limiting: track last API call timestamps (steady_clock ms)
-    std::int64_t last_hl_api_ms_ {0};
+    struct DeferredHlAction {
+        Action action;
+    };
+    std::int64_t last_hl_place_ms_ {0};
+    std::int64_t last_hl_cancel_ms_ {0};
     std::int64_t last_lighter_api_ms_ {0};
+    std::optional<DeferredHlAction> deferred_hl_action_;
+    std::optional<std::int64_t> next_retry_steady_ms_;
     [[nodiscard]] std::int64_t steady_now_ms() const noexcept;
     
     // Returns true if current position exceeds max_position_usd.
