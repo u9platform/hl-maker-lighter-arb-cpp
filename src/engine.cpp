@@ -65,8 +65,7 @@ std::vector<EventLog> MakerHedgeEngine::on_market_data(std::int64_t now_ms) {
     // Actually: check which direction would increase vs decrease position.
     // hl_position_base_ > 0 → long on HL → reduce = sell on HL → LongLighterShortHl
     // hl_position_base_ < 0 → short on HL → reduce = buy on HL → ShortLighterLongHl
-    if (position_limit_reached(snapshot.hl.mid()) &&
-        strategy_.state() == StrategyState::Idle) {
+    if (position_limit_reached(snapshot.hl.mid())) {
         // Determine which direction the spread would trigger
         const bool would_buy_hl = (snapshot.cross_spread_bps >= 0.0);  // ShortLighterLongHl = buy on HL
         const bool would_increase_pos = (hl_position_base_ >= 0.0 && would_buy_hl)
@@ -370,6 +369,21 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
         case ActionType::None:
             return events;
         case ActionType::PlaceHlMaker: {
+            // Position limit: block orders that would increase position beyond max
+            if (action.maker_order) {
+                const double mid = snapshot.hl.mid();
+                if (mid > 0.0) {
+                    const double pos_usd = std::abs(hl_position_base_) * mid;
+                    if (pos_usd >= config_.strategy.max_position_usd) {
+                        const bool would_buy_hl = action.maker_order->is_buy;
+                        const bool would_increase = (hl_position_base_ >= 0.0 && would_buy_hl)
+                                                 || (hl_position_base_ < 0.0 && !would_buy_hl);
+                        if (would_increase) {
+                            return events;  // Block — would exceed position limit
+                        }
+                    }
+                }
+            }
             // Rate limit: skip if too soon since last HL API call
             {
                 const auto now = steady_now_ms();
