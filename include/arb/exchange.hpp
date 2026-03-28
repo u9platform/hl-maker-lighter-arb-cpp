@@ -52,6 +52,7 @@ struct LighterIocRequest {
     bool is_ask {false};
     double price {0.0};
     double size {0.0};
+    double signal_price {0.0};  // Lighter mid at signal time (for accurate fill price logging)
     bool dry_run {true};
 };
 

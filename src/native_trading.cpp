@@ -659,10 +659,19 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
         const double delta = std::abs(snap_after.size - pos_before);
         fill_confirmed = delta > 0.001;
         confirmed_size = delta;
-        const double value_before = std::abs(pos_before) * snap_before.avg_entry_price;
-        const double value_after = std::abs(snap_after.size) * snap_after.avg_entry_price;
-        if (delta > 0.0001) {
-            fill_price = std::abs(value_after - value_before) / delta;
+        // Detect if position is increasing or decreasing
+        const bool pos_increasing = std::abs(snap_after.size) > std::abs(pos_before) + 0.001;
+        if (pos_increasing) {
+            // Position increased: avg_entry changes → value-based calc is accurate
+            const double value_before = std::abs(pos_before) * snap_before.avg_entry_price;
+            const double value_after = std::abs(snap_after.size) * snap_after.avg_entry_price;
+            if (delta > 0.0001) {
+                fill_price = std::abs(value_after - value_before) / delta;
+            }
+        } else {
+            // Position decreased: avg_entry stays same → value-based calc returns avg_entry (WRONG)
+            // Use signal_price (Lighter mid at hedge time) as best approximation of real fill price
+            fill_price = request.signal_price > 0.0 ? request.signal_price : snap_before.avg_entry_price;
         }
         fill_confirm_latency_ns = perf_now_ns() - http_ack_ns;
         PerfCollector::instance().record_trade_path(

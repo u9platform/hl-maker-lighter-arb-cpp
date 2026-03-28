@@ -140,6 +140,7 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
         .is_ask = is_ask,
         .price = hedge_price,
         .size = fill_size_base,
+        .signal_price = lighter_mid,
         .dry_run = config_.dry_run,
     });
     const std::uint64_t lighter_ack_ns = perf_now_ns();
@@ -505,6 +506,7 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
                 .is_ask = action.hedge_intent->is_ask,
                 .price = action.hedge_intent->limit_price,
                 .size = action.hedge_intent->size_base,
+                .signal_price = action.hedge_intent->limit_price,
                 .dry_run = config_.dry_run,
             });
             std::ostringstream msg;
