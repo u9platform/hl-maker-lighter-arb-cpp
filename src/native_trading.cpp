@@ -746,16 +746,36 @@ void NativeLighterTrading::ensure_client() {
     price_decimals_ = static_cast<int>(first_match_as_double(response.body, price_dec_pattern));
     size_decimals_ = static_cast<int>(first_match_as_double(response.body, size_dec_pattern));
     min_base_amount_ = first_match_as_double(response.body, min_base_pattern);
+    refresh_nonce_cache();
     client_ready_ = true;
 }
 
-std::uint64_t NativeLighterTrading::next_nonce() const {
+std::uint64_t NativeLighterTrading::fetch_remote_next_nonce() const {
     const HttpResponse response = http_get(
         config_.api_url + "/api/v1/nextNonce?account_index=" + std::to_string(config_.account_index) +
         "&api_key_index=" + std::to_string(config_.api_key_index)
     );
     const std::regex nonce_pattern(R"REGEX("nonce":([0-9]+))REGEX");
     return static_cast<std::uint64_t>(first_match_as_double(response.body, nonce_pattern));
+}
+
+void NativeLighterTrading::refresh_nonce_cache() const {
+    const std::uint64_t remote_nonce = fetch_remote_next_nonce();
+    nonce_cache_.store(remote_nonce + 1, std::memory_order_release);
+}
+
+std::uint64_t NativeLighterTrading::next_nonce() const {
+    const std::uint64_t cached = nonce_cache_.load(std::memory_order_acquire);
+    if (cached != 0) {
+        return nonce_cache_.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    const std::uint64_t remote_nonce = fetch_remote_next_nonce();
+    std::uint64_t expected = 0;
+    if (nonce_cache_.compare_exchange_strong(expected, remote_nonce + 1, std::memory_order_acq_rel)) {
+        return remote_nonce;
+    }
+    return nonce_cache_.fetch_add(1, std::memory_order_acq_rel);
 }
 
 std::int64_t NativeLighterTrading::scaled_size(double size) const {

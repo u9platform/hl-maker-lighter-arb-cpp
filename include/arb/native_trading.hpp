@@ -3,6 +3,7 @@
 #include "arb/crypto.hpp"
 #include "arb/exchange.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -80,6 +81,8 @@ class NativeLighterTrading final : public LighterExchange {
 
   private:
     void ensure_client();
+    [[nodiscard]] std::uint64_t fetch_remote_next_nonce() const;
+    void refresh_nonce_cache() const;
     [[nodiscard]] std::uint64_t next_nonce() const;
     [[nodiscard]] std::int64_t scaled_size(double size) const;
     [[nodiscard]] std::uint32_t scaled_price(double price) const;
@@ -95,6 +98,7 @@ class NativeLighterTrading final : public LighterExchange {
     int price_decimals_ {4};
     int size_decimals_ {2};
     double min_base_amount_ {0.0};
+    mutable std::atomic<std::uint64_t> nonce_cache_ {0};
 };
 
 }  // namespace arb
