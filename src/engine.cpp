@@ -535,6 +535,10 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
                 perf_trace_.oid = ack.oid;
                 // Remember direction so partial fills can hedge correctly
                 last_maker_direction_ = action.maker_order->direction;
+                // Record wall-clock time for trade timestamp filtering
+                maker_order_placed_epoch_ms_ = static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count());
                 // Reset speculative hedge state for new order
                 speculative_hedge_sent_ = false;
                 speculative_hedge_size_ = 0.0;
@@ -591,35 +595,40 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             // but before the fill message was received (race condition).
             // The OID will be removed when the fill is actually processed.
             
-            // If speculative hedge was already sent, we need to unwind it on Lighter
-            if (speculative_hedge_sent_) {
-                const Direction dir = last_maker_direction_;
-                const bool spec_was_ask = (dir == Direction::ShortLighterLongHl);
-                // Unwind = reverse direction on Lighter
-                const double lighter_mid = snapshot.lighter.mid();
-                constexpr double kSlippageBps = 15.0;
-                const double unwind_price = spec_was_ask
-                    ? lighter_mid * (1.0 + kSlippageBps / 10000.0)   // buy back what we sold
-                    : lighter_mid * (1.0 - kSlippageBps / 10000.0);  // sell what we bought
+            if (ack.ok) {
+                // Cancel succeeded — safe to unwind speculative hedge and clear OID
+                if (speculative_hedge_sent_) {
+                    const Direction dir = last_maker_direction_;
+                    const bool spec_was_ask = (dir == Direction::ShortLighterLongHl);
+                    const double lighter_mid = snapshot.lighter.mid();
+                    constexpr double kSlippageBps = 15.0;
+                    const double unwind_price = spec_was_ask
+                        ? lighter_mid * (1.0 + kSlippageBps / 10000.0)
+                        : lighter_mid * (1.0 - kSlippageBps / 10000.0);
 
-                const LighterIocAck unwind_ack = lighter_.place_ioc_order(LighterIocRequest {
-                    .is_ask = !spec_was_ask,  // reverse direction
-                    .price = unwind_price,
-                    .size = speculative_hedge_size_,
-                    .signal_price = lighter_mid,
-                    .dry_run = config_.dry_run,
-                });
+                    const LighterIocAck unwind_ack = lighter_.place_ioc_order(LighterIocRequest {
+                        .is_ask = !spec_was_ask,
+                        .price = unwind_price,
+                        .size = speculative_hedge_size_,
+                        .signal_price = lighter_mid,
+                        .dry_run = config_.dry_run,
+                    });
 
-                std::ostringstream unwind_msg;
-                unwind_msg << "SPECULATIVE HEDGE UNWIND (HL cancelled): sz=" << speculative_hedge_size_
-                           << " " << (unwind_ack.ok ? "SUCCESS" : "FAILED: " + unwind_ack.message);
-                events.push_back(EventLog{.message = unwind_msg.str()});
+                    std::ostringstream unwind_msg;
+                    unwind_msg << "SPECULATIVE HEDGE UNWIND (HL cancelled): sz=" << speculative_hedge_size_
+                               << " " << (unwind_ack.ok ? "SUCCESS" : "FAILED: " + unwind_ack.message);
+                    events.push_back(EventLog{.message = unwind_msg.str()});
+                }
+                speculative_hedge_sent_ = false;
+                speculative_hedge_size_ = 0.0;
+                speculative_hedge_oid_.clear();
+                active_hl_oid_.reset();
+            } else {
+                // Cancel failed — order may still be live or already filled.
+                // Do NOT clear active_hl_oid_ or unwind speculative hedge.
+                // The fill path will handle reconciliation if it was filled.
+                events.push_back(EventLog{.message = "cancel failed, keeping OID active for fill reconciliation"});
             }
-            speculative_hedge_sent_ = false;
-            speculative_hedge_size_ = 0.0;
-            speculative_hedge_oid_.clear();
-            
-            active_hl_oid_.reset();
             return events;
         }
         case ActionType::SendLighterTakerHedge: {
@@ -711,6 +720,13 @@ std::vector<EventLog> MakerHedgeEngine::on_trade_event(const TradeEvent& trade) 
     // Skip if speculative hedge already sent for this order
     if (speculative_hedge_sent_) {
         return {};
+    }
+
+    // TIMESTAMP GATE: only react to trades that occurred AFTER our maker order
+    // was placed. Stale/delayed trades must not trigger speculative hedges.
+    if (trade.exchange_time_ms > 0 && maker_order_placed_epoch_ms_ > 0
+        && trade.exchange_time_ms < maker_order_placed_epoch_ms_) {
+        return {};  // trade is older than our order placement
     }
 
     const double trade_price = trade.price;

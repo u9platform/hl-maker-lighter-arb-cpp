@@ -57,7 +57,8 @@ struct TradeEvent {
     double price {0.0};
     double size {0.0};
     bool is_buy {true};
-    std::uint64_t timestamp_ns {0};
+    std::uint64_t timestamp_ns {0};     // local monotonic clock
+    std::uint64_t exchange_time_ms {0}; // HL server timestamp (ms since epoch)
 };
 
 struct StrategyConfig {

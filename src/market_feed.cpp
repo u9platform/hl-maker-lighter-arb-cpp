@@ -275,6 +275,17 @@ bool parse_hl_trades(const std::string& msg, const std::string& target_coin, std
             }
         }
 
+        // Exchange timestamp (ms) — "time":1774708792573
+        auto time_pos = msg.find("\"time\"", side_pos != std::string::npos ? side_pos : se);
+        if (time_pos != std::string::npos) {
+            auto colon = msg.find(':', time_pos + 5);
+            if (colon != std::string::npos) {
+                ++colon;
+                while (colon < msg.size() && msg[colon] == ' ') ++colon;
+                try { trade.exchange_time_ms = std::stoull(msg.substr(colon)); } catch (...) {}
+            }
+        }
+
         trades.push_back(std::move(trade));
         search_pos = se + 1;
     }

@@ -95,6 +95,7 @@ class MakerHedgeEngine {
     bool speculative_hedge_sent_ {false};
     double speculative_hedge_size_ {0.0};
     std::string speculative_hedge_oid_;
+    std::uint64_t maker_order_placed_epoch_ms_ {0}; // epoch ms when HL maker order was acked
 
     // Rate limiting: track last API call timestamps (steady_clock ms)
     struct DeferredHlAction {
