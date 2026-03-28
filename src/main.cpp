@@ -12,6 +12,8 @@ std::string_view state_name(arb::StrategyState state) {
             return "Idle";
         case arb::StrategyState::PendingHlMaker:
             return "PendingHlMaker";
+        case arb::StrategyState::CancelledPendingConfirm:
+            return "CancelledPendingConfirm";
         case arb::StrategyState::HlFilledPendingLighterHedge:
             return "HlFilledPendingLighterHedge";
         case arb::StrategyState::Open:

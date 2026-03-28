@@ -75,9 +75,31 @@ Action HlMakerLighterHedger::on_market_snapshot(const SpreadSnapshot& snapshot, 
             action.reason = "spread mean-reverted below cancel threshold";
             action.maker_order = pending_maker_;
 
-            pending_maker_.reset();
-            state_ = StrategyState::Idle;
+            // BUG FIX: Do NOT reset pending_maker_ here.
+            // A cancel request is sent to HL, but the order may have already been
+            // filled before the cancel arrives. If we reset pending_maker_, the
+            // subsequent on_hl_maker_fill() will find no pending order and silently
+            // drop the fill — creating a naked position with no hedge.
+            // pending_maker_ will be reset when:
+            //   a) on_hl_maker_fill() processes the fill and sends the hedge, OR
+            //   b) the next on_market_snapshot() places a new maker order (overwriting it)
+            state_ = StrategyState::CancelledPendingConfirm;
             last_disarm_ms_ = now_ms;
+            return action;
+        }
+    }
+
+    // If we sent a cancel but haven't confirmed it yet, check if we should re-arm.
+    if (state_ == StrategyState::CancelledPendingConfirm) {
+        if (abs_spread >= config_.spread_bps && can_arm(now_ms)) {
+            // Spread widened again — place a new maker order (overwrite old pending_maker_)
+            pending_maker_ = build_maker_order(snapshot);
+            state_ = StrategyState::PendingHlMaker;
+
+            Action action;
+            action.type = ActionType::PlaceHlMaker;
+            action.reason = "spread re-widened after cancel";
+            action.maker_order = pending_maker_;
             return action;
         }
     }

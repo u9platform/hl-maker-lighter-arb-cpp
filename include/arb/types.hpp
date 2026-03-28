@@ -14,6 +14,7 @@ enum class Direction {
 enum class StrategyState {
     Idle,
     PendingHlMaker,
+    CancelledPendingConfirm,  // Cancel sent but fill may still arrive; pending_maker_ retained.
     HlFilledPendingLighterHedge,
     Open,
     UnwindingHl,

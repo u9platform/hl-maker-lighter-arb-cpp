@@ -83,7 +83,10 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             });
             if (ack.ok) {
                 active_hl_oid_ = ack.oid;
-                // BUG FIX 3: Track this OID in the recently placed set to handle fill race conditions
+                // Clear old tracked oids — new cycle means old cancelled oids are stale.
+                // Any fill for an old oid at this point would be very late (>seconds)
+                // and we'd rather detect it via position monitoring than hedge blindly.
+                recently_placed_oids_.clear();
                 recently_placed_oids_.insert(ack.oid);
                 events.push_back(EventLog {.message = "placed hl maker oid=" + ack.oid});
             } else {
