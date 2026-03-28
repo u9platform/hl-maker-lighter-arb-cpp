@@ -227,6 +227,61 @@ bool parse_hl_fill(const std::string& msg, std::vector<ParsedFill>& fills) {
     return !fills.empty();
 }
 
+// Parse HL trades WS message:
+// {"channel":"trades","data":{"coin":"HYPE","time":123,"trades":[{"px":"21.50","sz":"2.5","side":"B","time":123456789,...}]}}
+bool parse_hl_trades(const std::string& msg, const std::string& target_coin, std::vector<TradeEvent>& trades) {
+    if (msg.find("\"trades\"") == std::string::npos) return false;
+    if (msg.find("\"coin\":\"" + target_coin + "\"") == std::string::npos) return false;
+
+    // Find trades array
+    std::size_t pos = msg.find("\"trades\"");
+    if (pos == std::string::npos) return false;
+
+    // Parse each trade object
+    std::size_t search_pos = pos;
+    while (true) {
+        auto px_pos = msg.find("\"px\"", search_pos);
+        if (px_pos == std::string::npos) break;
+
+        TradeEvent trade;
+        trade.coin = target_coin;
+        trade.timestamp_ns = perf_now_ns(); // Use local timestamp
+
+        // Price
+        auto ps = msg.find('"', px_pos + 4);
+        if (ps == std::string::npos) break;
+        ++ps;
+        auto pe = msg.find('"', ps);
+        if (pe == std::string::npos) break;
+        try { trade.price = std::stod(msg.substr(ps, pe - ps)); } catch (...) { break; }
+
+        // Size
+        auto sz_pos = msg.find("\"sz\"", pe);
+        if (sz_pos == std::string::npos) break;
+        auto ss = msg.find('"', sz_pos + 4);
+        if (ss == std::string::npos) break;
+        ++ss;
+        auto se = msg.find('"', ss);
+        if (se == std::string::npos) break;
+        try { trade.size = std::stod(msg.substr(ss, se - ss)); } catch (...) { break; }
+
+        // Side
+        auto side_pos = msg.find("\"side\"", se);
+        if (side_pos != std::string::npos) {
+            auto side_s = msg.find('"', side_pos + 6);
+            if (side_s != std::string::npos) {
+                ++side_s;
+                trade.is_buy = (msg[side_s] == 'B');
+            }
+        }
+
+        trades.push_back(std::move(trade));
+        search_pos = se + 1;
+    }
+
+    return !trades.empty();
+}
+
 }  // namespace
 
 // --- MarketFeed ---
@@ -239,6 +294,10 @@ MarketFeed::~MarketFeed() {
 
 void MarketFeed::set_on_update(OnBboUpdate cb) {
     on_update_ = std::move(cb);
+}
+
+void MarketFeed::set_on_trade(OnTradeCallback cb) {
+    on_trade_ = std::move(cb);
 }
 
 void MarketFeed::start() {
@@ -254,6 +313,7 @@ void MarketFeed::start() {
     hl_ws_->set_on_disconnect([this](const std::string& reason) {
         std::cerr << "[hl-ws] disconnected: " << reason << '\n';
         hl_subscribed_.store(false, std::memory_order_release);
+        hl_trades_subscribed_.store(false, std::memory_order_release);
         // Re-queue subscribe for reconnect (pending_sends_ was cleared on last handshake).
         subscribe_hl();
     });
@@ -306,25 +366,40 @@ bool MarketFeed::lighter_connected() const noexcept { return lighter_ws_ && ligh
 
 void MarketFeed::on_hl_message(const std::string& msg) {
     const std::uint64_t local_rx_ns = perf_now_ns();
+    
     // HL WS protocol: we send subscribe, then get subscriptionResponse, then data.
-    if (!hl_subscribed_.load(std::memory_order_relaxed)) {
-        if (msg.find("subscriptionResponse") != std::string::npos) {
+    if (msg.find("subscriptionResponse") != std::string::npos) {
+        if (msg.find("\"bbo\"") != std::string::npos && !hl_subscribed_.load(std::memory_order_relaxed)) {
             hl_subscribed_.store(true, std::memory_order_release);
             std::cerr << "[hl-ws] subscribed to bbo:" << config_.hl_coin << '\n';
+        }
+        if (msg.find("\"trades\"") != std::string::npos && on_trade_ && !hl_trades_subscribed_.load(std::memory_order_relaxed)) {
+            hl_trades_subscribed_.store(true, std::memory_order_release);
+            std::cerr << "[hl-ws] subscribed to trades:" << config_.hl_coin << '\n';
         }
         // The subscription response may also contain initial snapshot data — fall through to parse.
     }
 
     // Parse bbo updates.
     double bid = 0.0, ask = 0.0;
-    const bool ok = msg.find("\"bbo\"") != std::string::npos && parse_hl_bbo(msg, bid, ask);
-    if (ok) {
+    const bool bbo_ok = msg.find("\"bbo\"") != std::string::npos && parse_hl_bbo(msg, bid, ask);
+    if (bbo_ok) {
         hl_bbo_.store(bid, ask);
         PerfCollector::instance().record_hot_path(
             PerfMetric::HlMarketLocalRxToBboUpdateNs,
             perf_now_ns() - local_rx_ns
         );
         if (on_update_) on_update_();
+    }
+
+    // Parse trade events for speculative hedging
+    if (on_trade_ && hl_trades_subscribed_.load(std::memory_order_relaxed)) {
+        std::vector<TradeEvent> trades;
+        if (parse_hl_trades(msg, config_.hl_coin, trades)) {
+            for (const auto& trade : trades) {
+                on_trade_(trade);
+            }
+        }
     }
 }
 
@@ -362,10 +437,17 @@ void MarketFeed::on_lighter_message(const std::string& msg) {
 }
 
 void MarketFeed::subscribe_hl() {
-    // Use the lighter-weight BBO channel for HL market data.
-    const std::string sub_book = "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"bbo\",\"coin\":\"" +
+    // Subscribe to BBO for market data
+    const std::string sub_bbo = "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"bbo\",\"coin\":\"" +
         config_.hl_coin + "\"}}";
-    hl_ws_->send(sub_book);
+    hl_ws_->send(sub_bbo);
+
+    // Subscribe to trades for speculative hedging if callback is set
+    if (on_trade_) {
+        const std::string sub_trades = "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"trades\",\"coin\":\"" +
+            config_.hl_coin + "\"}}";
+        hl_ws_->send(sub_trades);
+    }
 }
 
 void MarketFeed::subscribe_lighter() {

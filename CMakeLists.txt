@@ -115,3 +115,9 @@ add_executable(risk_tests
 )
 
 target_link_libraries(risk_tests PRIVATE arb_core)
+
+add_executable(speculative_hedge_tests
+    tests/test_speculative_hedge.cpp
+)
+
+target_link_libraries(speculative_hedge_tests PRIVATE arb_ws)

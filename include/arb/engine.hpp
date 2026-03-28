@@ -41,6 +41,9 @@ class MakerHedgeEngine {
     [[nodiscard]] std::vector<EventLog> on_lighter_hedge_reject();
     void on_lighter_hedge_fill(double fill_price);
 
+    /// Speculative hedge when trade price crosses our maker order.
+    [[nodiscard]] std::vector<EventLog> on_trade_event(const TradeEvent& trade);
+
     [[nodiscard]] const std::optional<std::string>& active_hl_oid() const noexcept;
     [[nodiscard]] const HlMakerLighterHedger& strategy() const noexcept;
     [[nodiscard]] double hl_position_base() const noexcept;
@@ -87,6 +90,11 @@ class MakerHedgeEngine {
     // Positive = long, negative = short. Updated on each fill.
     double hl_position_base_ {0.0};
     OrderPerfTrace perf_trace_;
+
+    // Speculative hedge tracking
+    bool speculative_hedge_sent_ {false};
+    double speculative_hedge_size_ {0.0};
+    std::string speculative_hedge_oid_;
 
     // Rate limiting: track last API call timestamps (steady_clock ms)
     struct DeferredHlAction {

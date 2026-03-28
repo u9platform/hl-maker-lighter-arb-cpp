@@ -45,6 +45,9 @@ struct AtomicBbo {
 /// Callback fired on *every* BBO update from either venue.
 using OnBboUpdate = std::function<void()>;
 
+/// Callback fired on HL trade events (for speculative hedging).
+using OnTradeCallback = std::function<void(const TradeEvent&)>;
+
 /// Manages WS connections to HL and Lighter, parses orderbook messages,
 /// and maintains thread-safe BBO state.
 class MarketFeed {
@@ -66,6 +69,9 @@ class MarketFeed {
 
     /// Set callback before start().
     void set_on_update(OnBboUpdate cb);
+
+    /// Set trade callback for speculative hedging.
+    void set_on_trade(OnTradeCallback cb);
 
     /// Start both WS connections.
     void start();
@@ -99,8 +105,10 @@ class MarketFeed {
     AtomicBbo hl_bbo_;
     AtomicBbo lighter_bbo_;
     OnBboUpdate on_update_;
+    OnTradeCallback on_trade_;
     std::atomic<bool> hl_subscribed_ {false};
     std::atomic<bool> lighter_subscribed_ {false};
+    std::atomic<bool> hl_trades_subscribed_ {false};
 };
 
 /// HL WebSocket user fill feed — subscribe to userFills for fill callbacks.

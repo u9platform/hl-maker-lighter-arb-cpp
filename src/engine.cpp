@@ -110,6 +110,97 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
     // with the same oid. Each partial fill must be hedged independently.
     // The oid will be cleaned up when a new order is placed (clear + insert).
 
+    std::vector<EventLog> events;
+    
+    // SPECULATIVE HEDGE RECONCILIATION
+    if (speculative_hedge_sent_ && oid == speculative_hedge_oid_) {
+        // Speculative hedge was already sent - reconcile sizes
+        const double size_diff = fill_size_base - speculative_hedge_size_;
+        
+        if (std::abs(size_diff) < 0.001) {
+            // Perfect match - no additional hedging needed
+            std::ostringstream msg;
+            msg << "SPECULATIVE HEDGE RECONCILED: hl_fill=" << fill_size_base 
+                << " hedge=" << speculative_hedge_size_ << " diff=0";
+            events.push_back(EventLog{.message = msg.str()});
+            
+            // Update position and reset speculative state
+            const Direction dir = last_maker_direction_;
+            const bool hl_is_buy = (dir == Direction::ShortLighterLongHl);
+            hl_position_base_ += hl_is_buy ? fill_size_base : -fill_size_base;
+            
+            speculative_hedge_sent_ = false;
+            speculative_hedge_size_ = 0.0;
+            speculative_hedge_oid_.clear();
+            
+            return events;
+        } else if (size_diff > 0.001) {
+            // HL fill is larger - need additional hedge for the difference
+            const Direction dir = last_maker_direction_;
+            const bool is_ask = (dir == Direction::ShortLighterLongHl);
+            const double lighter_mid = snapshot.lighter.mid();
+            constexpr double kSlippageBps = 10.0;
+            const double hedge_price = is_ask
+                ? lighter_mid * (1.0 - kSlippageBps / 10000.0)
+                : lighter_mid * (1.0 + kSlippageBps / 10000.0);
+
+            const LighterIocAck ack = lighter_.place_ioc_order(LighterIocRequest {
+                .is_ask = is_ask,
+                .price = hedge_price,
+                .size = size_diff,
+                .signal_price = lighter_mid,
+                .dry_run = config_.dry_run,
+            });
+
+            std::ostringstream msg;
+            msg << "SPECULATIVE HEDGE + CORRECTION: hl_fill=" << fill_size_base 
+                << " spec_hedge=" << speculative_hedge_size_ 
+                << " correction=" << size_diff << " " << (ack.ok ? "SUCCESS" : "FAILED");
+            events.push_back(EventLog{.message = msg.str()});
+            
+            // Update position
+            const bool hl_is_buy = (dir == Direction::ShortLighterLongHl);
+            hl_position_base_ += hl_is_buy ? fill_size_base : -fill_size_base;
+        } else {
+            // HL fill is smaller than speculative hedge — unwind the overshoot on Lighter
+            const double overshoot = -size_diff;
+            const Direction dir = last_maker_direction_;
+            const bool spec_was_ask = (dir == Direction::ShortLighterLongHl);
+            const double lighter_mid = snapshot.lighter.mid();
+            constexpr double kSlippageBps = 15.0;
+            // Reverse direction to unwind
+            const double unwind_price = spec_was_ask
+                ? lighter_mid * (1.0 + kSlippageBps / 10000.0)
+                : lighter_mid * (1.0 - kSlippageBps / 10000.0);
+
+            const LighterIocAck unwind_ack = lighter_.place_ioc_order(LighterIocRequest {
+                .is_ask = !spec_was_ask,
+                .price = unwind_price,
+                .size = overshoot,
+                .signal_price = lighter_mid,
+                .dry_run = config_.dry_run,
+            });
+
+            std::ostringstream msg;
+            msg << "SPECULATIVE HEDGE OVERSHOOT UNWIND: hl_fill=" << fill_size_base 
+                << " spec_hedge=" << speculative_hedge_size_ << " overshoot=" << overshoot
+                << " unwind " << (unwind_ack.ok ? "SUCCESS" : "FAILED: " + unwind_ack.message);
+            events.push_back(EventLog{.message = msg.str()});
+            
+            // Update position based on actual HL fill
+            const bool hl_is_buy = (dir == Direction::ShortLighterLongHl);
+            hl_position_base_ += hl_is_buy ? fill_size_base : -fill_size_base;
+        }
+        
+        // Reset speculative state
+        speculative_hedge_sent_ = false;
+        speculative_hedge_size_ = 0.0;
+        speculative_hedge_oid_.clear();
+        
+        return events;
+    }
+    
+    // NO SPECULATIVE HEDGE - proceed with normal hedging
     // For each partial fill, send an immediate Lighter hedge regardless of strategy state.
     // This avoids the state machine getting confused by partial fills.
     const Direction dir = last_maker_direction_;
@@ -158,7 +249,6 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
         lighter_ack_ns - fill_rx_ns
     );
 
-    std::vector<EventLog> events;
     std::ostringstream msg;
     std::ostringstream perf_msg;
     if (ack.ok && ack.fill_confirmed) {
@@ -445,6 +535,10 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
                 perf_trace_.oid = ack.oid;
                 // Remember direction so partial fills can hedge correctly
                 last_maker_direction_ = action.maker_order->direction;
+                // Reset speculative hedge state for new order
+                speculative_hedge_sent_ = false;
+                speculative_hedge_size_ = 0.0;
+                speculative_hedge_oid_.clear();
                 events.push_back(EventLog {.message = "placed hl maker oid=" + ack.oid});
             } else {
                 events.push_back(EventLog {.message = "hl maker placement failed: " + ack.message});
@@ -496,6 +590,35 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             // This allows us to still match fills that arrive after the cancel was sent
             // but before the fill message was received (race condition).
             // The OID will be removed when the fill is actually processed.
+            
+            // If speculative hedge was already sent, we need to unwind it on Lighter
+            if (speculative_hedge_sent_) {
+                const Direction dir = last_maker_direction_;
+                const bool spec_was_ask = (dir == Direction::ShortLighterLongHl);
+                // Unwind = reverse direction on Lighter
+                const double lighter_mid = snapshot.lighter.mid();
+                constexpr double kSlippageBps = 15.0;
+                const double unwind_price = spec_was_ask
+                    ? lighter_mid * (1.0 + kSlippageBps / 10000.0)   // buy back what we sold
+                    : lighter_mid * (1.0 - kSlippageBps / 10000.0);  // sell what we bought
+
+                const LighterIocAck unwind_ack = lighter_.place_ioc_order(LighterIocRequest {
+                    .is_ask = !spec_was_ask,  // reverse direction
+                    .price = unwind_price,
+                    .size = speculative_hedge_size_,
+                    .signal_price = lighter_mid,
+                    .dry_run = config_.dry_run,
+                });
+
+                std::ostringstream unwind_msg;
+                unwind_msg << "SPECULATIVE HEDGE UNWIND (HL cancelled): sz=" << speculative_hedge_size_
+                           << " " << (unwind_ack.ok ? "SUCCESS" : "FAILED: " + unwind_ack.message);
+                events.push_back(EventLog{.message = unwind_msg.str()});
+            }
+            speculative_hedge_sent_ = false;
+            speculative_hedge_size_ = 0.0;
+            speculative_hedge_oid_.clear();
+            
             active_hl_oid_.reset();
             return events;
         }
@@ -572,6 +695,93 @@ std::optional<std::int64_t> MakerHedgeEngine::hl_cancel_retry_at_ms(std::int64_t
         return std::nullopt;
     }
     return last_hl_cancel_ms_ + config_.hl_order_interval_ms;
+}
+
+std::vector<EventLog> MakerHedgeEngine::on_trade_event(const TradeEvent& trade) {
+    // Only react to trades when we have an active maker order
+    if (!active_hl_oid_.has_value()) {
+        return {};
+    }
+
+    const auto& strategy_pending = strategy_.pending_maker();
+    if (!strategy_pending.has_value()) {
+        return {};
+    }
+
+    // Skip if speculative hedge already sent for this order
+    if (speculative_hedge_sent_) {
+        return {};
+    }
+
+    const double trade_price = trade.price;
+    const double maker_price = strategy_pending->price;
+    const bool maker_is_buy = strategy_pending->is_buy;
+
+    // Check if trade price crosses our maker order price
+    bool price_crossed = false;
+    if (maker_is_buy && trade_price <= maker_price) {
+        price_crossed = true; // Trade at or below our buy order
+    } else if (!maker_is_buy && trade_price >= maker_price) {
+        price_crossed = true; // Trade at or above our sell order
+    }
+
+    if (!price_crossed) {
+        return {};
+    }
+
+    // Get current market snapshot for hedge pricing
+    const SpreadSnapshot snapshot = collect_snapshot();
+    if (!snapshot.valid(config_.strategy.max_quote_age_ms)) {
+        return {};
+    }
+
+    // Fire speculative hedge immediately
+    const Direction dir = strategy_pending->direction;
+    const bool is_ask = (dir == Direction::ShortLighterLongHl);
+    const double hedge_size = strategy_pending->size_base;
+
+    // Use aggressive pricing to ensure fill
+    const double lighter_mid = snapshot.lighter.mid();
+    constexpr double kSlippageBps = 15.0; // More aggressive than normal hedge
+    const double hedge_price = is_ask
+        ? lighter_mid * (1.0 - kSlippageBps / 10000.0)
+        : lighter_mid * (1.0 + kSlippageBps / 10000.0);
+
+    const std::uint64_t hedge_send_ns = perf_now_ns();
+    const LighterIocAck ack = lighter_.place_ioc_order(LighterIocRequest {
+        .is_ask = is_ask,
+        .price = hedge_price,
+        .size = hedge_size,
+        .signal_price = lighter_mid,
+        .dry_run = config_.dry_run,
+    });
+    const std::uint64_t hedge_ack_ns = perf_now_ns();
+
+    // Mark speculative hedge as sent
+    speculative_hedge_sent_ = true;
+    speculative_hedge_size_ = hedge_size;
+    speculative_hedge_oid_ = *active_hl_oid_;
+
+    std::vector<EventLog> events;
+    std::ostringstream msg;
+    
+    if (ack.ok && ack.fill_confirmed) {
+        msg << "SPECULATIVE HEDGE SUCCESS: trade_px=" << trade_price
+            << " maker_px=" << maker_price << " hedge_px=" << ack.fill_price
+            << " hedge_sz=" << ack.confirmed_size << " tx=" << ack.tx_hash
+            << " latency_ms=" << static_cast<double>(hedge_ack_ns - hedge_send_ns) / 1000000.0;
+    } else {
+        msg << "SPECULATIVE HEDGE FAILED: trade_px=" << trade_price
+            << " maker_px=" << maker_price << " err=" << ack.message
+            << " latency_ms=" << static_cast<double>(hedge_ack_ns - hedge_send_ns) / 1000000.0;
+        // Reset flag since hedge failed
+        speculative_hedge_sent_ = false;
+        speculative_hedge_size_ = 0.0;
+        speculative_hedge_oid_.clear();
+    }
+
+    events.push_back(EventLog{.message = msg.str()});
+    return events;
 }
 
 }  // namespace arb

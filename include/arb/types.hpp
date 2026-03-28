@@ -52,6 +52,14 @@ struct SpreadSnapshot {
     }
 };
 
+struct TradeEvent {
+    std::string coin;
+    double price {0.0};
+    double size {0.0};
+    bool is_buy {true};
+    std::uint64_t timestamp_ns {0};
+};
+
 struct StrategyConfig {
     double spread_bps {2.0};
     double close_spread_bps {0.0};   // 0 = use spread_bps for both open/close

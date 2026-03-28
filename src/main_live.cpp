@@ -290,6 +290,20 @@ int main() {
     // Wake strategy thread on every BBO update.
     feed.set_on_update([&] { publish_event(); });
 
+    // Trade event queue — same pattern as fill queue to avoid data races on engine state.
+    std::mutex g_trade_mu;
+    std::queue<arb::TradeEvent> g_trade_queue;
+
+    // Set trade callback for speculative hedging (enqueue, don't process on WS thread)
+    feed.set_on_trade([&](const arb::TradeEvent& trade) {
+        if (trade.coin != "HYPE") return;
+        {
+            std::lock_guard lock(g_trade_mu);
+            g_trade_queue.push(trade);
+        }
+        publish_event();
+    });
+
     // --- Fill Feed ---
     std::unique_ptr<arb::HlFillFeed> fill_feed;
     if (!hl_user_address.empty()) {
@@ -389,6 +403,23 @@ int main() {
                     std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
                 }
                 if (!logs.empty()) {
+                    ++trade_count;
+                }
+            }
+        }
+
+        // --- Process queued trade events on main thread (thread-safe) ---
+        {
+            std::lock_guard lock(g_trade_mu);
+            while (!g_trade_queue.empty()) {
+                const auto trade = std::move(g_trade_queue.front());
+                g_trade_queue.pop();
+
+                const auto trade_logs = engine.on_trade_event(trade);
+                for (const auto& log : trade_logs) {
+                    std::cerr << "[trade] " << timestamp_str() << " " << log.message << '\n';
+                }
+                if (!trade_logs.empty()) {
                     ++trade_count;
                 }
             }
