@@ -35,18 +35,49 @@ std::vector<EventLog> MakerHedgeEngine::on_market_data(std::int64_t now_ms) {
 
 std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, const std::string& oid) {
     // BUG FIX 3: Check if this fill belongs to any recently placed order, not just the current active one.
-    // This handles the race condition where a cancel is sent and active_hl_oid_ is reset,
-    // but the fill message arrives after that reset.
     if (recently_placed_oids_.find(oid) == recently_placed_oids_.end()) {
-        // This fill doesn't belong to any of our recent orders, ignore it
         return {};
     }
     
-    // Remove from tracking set since we've processed this fill
-    recently_placed_oids_.erase(oid);
+    // Do NOT erase the oid here — partial fills arrive as multiple messages
+    // with the same oid. Each partial fill must be hedged independently.
+    // The oid will be cleaned up when a new order is placed (clear + insert).
+
+    // For each partial fill, send an immediate Lighter hedge regardless of strategy state.
+    // This avoids the state machine getting confused by partial fills.
+    const Direction dir = last_maker_direction_;
+    const bool is_ask = (dir == Direction::ShortLighterLongHl);
     
-    const Action action = strategy_.on_hl_maker_fill(fill_price, fill_size_base, snapshot);
-    return execute_action(action, snapshot);
+    // Use aggressive price for taker hedge
+    const double lighter_mid = snapshot.lighter.mid();
+    constexpr double kSlippageBps = 10.0;
+    const double hedge_price = is_ask
+        ? lighter_mid * (1.0 - kSlippageBps / 10000.0)
+        : lighter_mid * (1.0 + kSlippageBps / 10000.0);
+
+    const LighterIocAck ack = lighter_.place_ioc_order(LighterIocRequest {
+        .is_ask = is_ask,
+        .price = hedge_price,
+        .size = fill_size_base,
+        .dry_run = config_.dry_run,
+    });
+
+    std::vector<EventLog> events;
+    std::ostringstream msg;
+    if (ack.ok) {
+        msg << "TRADE COMPLETE: hl_px=" << fill_price << " sz=" << fill_size_base
+            << " lt_hedge tx=" << ack.tx_hash
+            << " spread=" << snapshot.cross_spread_bps;
+    } else {
+        msg << "HEDGE FAILED for hl fill px=" << fill_price << " sz=" << fill_size_base
+            << " err=" << ack.message;
+    }
+    events.push_back(EventLog {.message = msg.str()});
+
+    // Reset strategy to Idle so it can immediately start looking for next trade
+    strategy_.reset();
+    active_hl_oid_.reset();
+    return events;
 }
 
 std::vector<EventLog> MakerHedgeEngine::on_lighter_hedge_reject() {
@@ -83,11 +114,10 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             });
             if (ack.ok) {
                 active_hl_oid_ = ack.oid;
-                // Clear old tracked oids — new cycle means old cancelled oids are stale.
-                // Any fill for an old oid at this point would be very late (>seconds)
-                // and we'd rather detect it via position monitoring than hedge blindly.
                 recently_placed_oids_.clear();
                 recently_placed_oids_.insert(ack.oid);
+                // Remember direction so partial fills can hedge correctly
+                last_maker_direction_ = action.maker_order->direction;
                 events.push_back(EventLog {.message = "placed hl maker oid=" + ack.oid});
             } else {
                 events.push_back(EventLog {.message = "hl maker placement failed: " + ack.message});

@@ -47,10 +47,13 @@ class MakerHedgeEngine {
     HlMakerLighterHedger strategy_;
     std::optional<std::string> active_hl_oid_;
     
-    // BUG FIX 3: Track recently placed OIDs to handle race condition between
-    // cancel and fill messages. Prevents fills from being ignored when they
-    // arrive after the engine has already reset active_hl_oid_ due to cancel.
+    // Track recently placed OIDs to handle race condition between
+    // cancel and fill messages, and partial fills with same oid.
     std::unordered_set<std::string> recently_placed_oids_;
+    
+    // Remember the direction of the last maker order so partial fills
+    // can hedge correctly even after strategy state is reset.
+    Direction last_maker_direction_ {Direction::ShortLighterLongHl};
 };
 
 }  // namespace arb
