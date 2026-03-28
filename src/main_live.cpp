@@ -23,6 +23,10 @@
 
 namespace {
 
+#ifndef ARB_GIT_VERSION
+#define ARB_GIT_VERSION "unknown"
+#endif
+
 std::atomic<bool> g_running {true};
 std::mutex g_cv_mu;
 std::condition_variable g_cv;
@@ -101,6 +105,8 @@ int main() {
     const double max_pos = env_double("MAX_POSITION_USD", 100.0);
 
     std::cerr << "=== HL Maker / Lighter Taker Arb (C++) ===\n"
+              << "version=" << ARB_GIT_VERSION
+              << " "
               << "dry_run=" << (dry_run ? "true" : "false")
               << " spread=" << spread_bps << " cancel_band=" << cancel_band
               << " pair_size=" << pair_size << " max_pos=" << max_pos << '\n';
@@ -322,6 +328,7 @@ int main() {
             std::cerr << "[telem] " << timestamp_str()
                       << " ticks=" << tick_count << " trades=" << trade_count
                       << " uptime=" << uptime_s << "s"
+                      << " version=" << ARB_GIT_VERSION
                       << " spread=" << std::fixed << std::setprecision(2) << snap.cross_spread_bps << "bps"
                       << " hl=" << snap.hl.bid << "/" << snap.hl.ask
                       << " lt=" << snap.lighter.bid << "/" << snap.lighter.ask

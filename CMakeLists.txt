@@ -6,6 +6,18 @@ project(hl_maker_lighter_arb
     LANGUAGES CXX
 )
 
+set(ARB_GIT_VERSION "unknown")
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        OUTPUT_VARIABLE ARB_GIT_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -28,6 +40,7 @@ target_include_directories(arb_core
 )
 
 target_compile_features(arb_core PUBLIC cxx_std_20)
+target_compile_definitions(arb_core PUBLIC ARB_GIT_VERSION="${ARB_GIT_VERSION}")
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(arb_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
