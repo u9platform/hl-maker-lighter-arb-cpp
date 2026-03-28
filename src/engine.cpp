@@ -65,16 +65,7 @@ std::vector<EventLog> MakerHedgeEngine::on_market_data(std::int64_t now_ms) {
     // Actually: check which direction would increase vs decrease position.
     // hl_position_base_ > 0 → long on HL → reduce = sell on HL → LongLighterShortHl
     // hl_position_base_ < 0 → short on HL → reduce = buy on HL → ShortLighterLongHl
-    if (position_limit_reached(snapshot.hl.mid())) {
-        // Determine which direction the spread would trigger
-        const bool would_buy_hl = (snapshot.cross_spread_bps >= 0.0);  // ShortLighterLongHl = buy on HL
-        const bool would_increase_pos = (hl_position_base_ >= 0.0 && would_buy_hl)
-                                     || (hl_position_base_ < 0.0 && !would_buy_hl);
-        if (would_increase_pos) {
-            return {};  // Skip — would increase position beyond limit
-        }
-        // Allow through — this direction reduces position
-    }
+    const bool pos_limit_hit = position_limit_reached(snapshot.hl.mid());
     
     const std::uint64_t decision_start_ns = perf_now_ns();
     const Action action = strategy_.on_market_snapshot(snapshot, now_ms, hl_position_base_);
@@ -85,6 +76,16 @@ std::vector<EventLog> MakerHedgeEngine::on_market_data(std::int64_t now_ms) {
     );
 
     if (action.type == ActionType::PlaceHlMaker) {
+        // Position limit: block orders that would INCREASE position beyond limit
+        if (pos_limit_hit && action.maker_order.has_value()) {
+            const bool would_buy_hl = action.maker_order->is_buy;
+            const bool would_increase = (hl_position_base_ >= 0.0 && would_buy_hl)
+                                     || (hl_position_base_ < 0.0 && !would_buy_hl);
+            if (would_increase) {
+                strategy_.reset();  // back to Idle so we don't get stuck
+                return {};
+            }
+        }
         perf_trace_ = {};
         perf_trace_.signal_ns = decision_end_ns;
     } else if (action.type == ActionType::CancelHlMaker) {
@@ -379,7 +380,8 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
                         const bool would_increase = (hl_position_base_ >= 0.0 && would_buy_hl)
                                                  || (hl_position_base_ < 0.0 && !would_buy_hl);
                         if (would_increase) {
-                            return events;  // Block — would exceed position limit
+                            strategy_.reset();  // back to Idle, don't get stuck in PendingHlMaker
+                            return events;
                         }
                     }
                 }
