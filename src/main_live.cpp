@@ -108,16 +108,13 @@ int main() {
     arb::MarketFeed feed(feed_config);
 
     // --- Native Trading Clients (for order submission) ---
-    // vault_address = the MAIN account address when using an agent wallet key.
-    // If HL_USER_ADDRESS is set, the private key is an agent wallet — set vault_address.
-    const auto vault_addr = hl_user_address.empty()
-        ? std::nullopt
-        : std::optional<std::string>(hl_user_address);
-
+    // Agent wallet mode: the approved agent key signs directly for the main account.
+    // vault_address in action_hash and API should be None (not the main account address).
+    // HL_USER_ADDRESS is only used for fill feed subscription and position queries.
     arb::NativeHyperliquidTrading hl_native({
         .api_url = "https://api.hyperliquid.xyz",
         .private_key = hl_private_key,
-        .vault_address = vault_addr,
+        .vault_address = std::nullopt,
         .coin = "HYPE",
     });
 
