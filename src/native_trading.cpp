@@ -476,6 +476,10 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
             .confirmed_size = request.size,
             .fill_price = request.price,
             .fee = 0.0,
+            .nonce_fetch_latency_ms = 0.0,
+            .sign_order_latency_ms = 0.0,
+            .send_tx_ack_latency_ms = 0.0,
+            .place_to_http_ack_latency_ms = 0.0,
             .http_ack_latency_ms = 0.0,
             .fill_confirm_latency_ms = 0.0,
             .confirm_attempts = 0,
@@ -489,6 +493,12 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     const std::uint64_t submit_start_ns = perf_now_ns();
 
     const auto next_nonce_value = next_nonce();
+    const std::uint64_t nonce_done_ns = perf_now_ns();
+    const std::uint64_t nonce_fetch_latency_ns = nonce_done_ns - submit_start_ns;
+    PerfCollector::instance().record_trade_path(
+        PerfMetric::LighterNonceFetchNs,
+        nonce_fetch_latency_ns
+    );
     const auto* signer = static_cast<LighterSignerHandle*>(signer_lib_);
     const auto result = signer->sign_create_order()(
         static_cast<int>(config_.market_index),
@@ -513,6 +523,12 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     const std::string tx_info = decode_and_free(result.txInfo, signer->free_fn());
     const std::string tx_hash = decode_and_free(result.txHash, signer->free_fn());
     decode_and_free(result.messageToSign, signer->free_fn());
+    const std::uint64_t sign_done_ns = perf_now_ns();
+    const std::uint64_t sign_order_latency_ns = sign_done_ns - nonce_done_ns;
+    PerfCollector::instance().record_trade_path(
+        PerfMetric::LighterSignOrderNs,
+        sign_order_latency_ns
+    );
     if (!err.empty()) {
         return LighterIocAck {
             .ok = false,
@@ -520,6 +536,10 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
             .message = err,
             .tx_hash = "",
             .confirmed_size = 0.0,
+            .nonce_fetch_latency_ms = static_cast<double>(nonce_fetch_latency_ns) / 1000000.0,
+            .sign_order_latency_ms = static_cast<double>(sign_order_latency_ns) / 1000000.0,
+            .send_tx_ack_latency_ms = 0.0,
+            .place_to_http_ack_latency_ms = 0.0,
             .http_ack_latency_ms = 0.0,
             .fill_confirm_latency_ms = 0.0,
             .confirm_attempts = 0,
@@ -529,6 +549,7 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     std::cerr << "[lighter-debug] tx_type=" << static_cast<int>(result.txType)
               << " tx_info_raw=" << tx_info.substr(0, 200) << '\n';
 
+    const std::uint64_t send_start_ns = perf_now_ns();
     std::string response_body;
     if (tx_transport_) {
         response_body = tx_transport_(result.txType, tx_info);
@@ -542,7 +563,12 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
         response_body = response.body;
     }
     const std::uint64_t http_ack_ns = perf_now_ns();
+    const std::uint64_t send_tx_ack_latency_ns = http_ack_ns - send_start_ns;
     const std::uint64_t http_ack_latency_ns = http_ack_ns - submit_start_ns;
+    PerfCollector::instance().record_trade_path(
+        PerfMetric::LighterSendTxAckNs,
+        send_tx_ack_latency_ns
+    );
     PerfCollector::instance().record_trade_path(
         PerfMetric::LighterSendToHttpAckNs,
         http_ack_latency_ns
@@ -558,6 +584,10 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
             .message = response_body,
             .tx_hash = tx_hash,
             .confirmed_size = 0.0,
+            .nonce_fetch_latency_ms = static_cast<double>(nonce_fetch_latency_ns) / 1000000.0,
+            .sign_order_latency_ms = static_cast<double>(sign_order_latency_ns) / 1000000.0,
+            .send_tx_ack_latency_ms = static_cast<double>(send_tx_ack_latency_ns) / 1000000.0,
+            .place_to_http_ack_latency_ms = static_cast<double>(http_ack_latency_ns) / 1000000.0,
             .http_ack_latency_ms = static_cast<double>(http_ack_latency_ns) / 1000000.0,
             .fill_confirm_latency_ms = 0.0,
             .confirm_attempts = 0,
@@ -635,6 +665,10 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
         .confirmed_size = confirmed_size,
         .fill_price = fill_price,
         .fee = 0.0,  // Lighter currently charges 0 fees
+        .nonce_fetch_latency_ms = static_cast<double>(nonce_fetch_latency_ns) / 1000000.0,
+        .sign_order_latency_ms = static_cast<double>(sign_order_latency_ns) / 1000000.0,
+        .send_tx_ack_latency_ms = static_cast<double>(send_tx_ack_latency_ns) / 1000000.0,
+        .place_to_http_ack_latency_ms = static_cast<double>(http_ack_latency_ns) / 1000000.0,
         .http_ack_latency_ms = static_cast<double>(http_ack_latency_ns) / 1000000.0,
         .fill_confirm_latency_ms = static_cast<double>(fill_confirm_latency_ns) / 1000000.0,
         .confirm_attempts = confirm_attempts,

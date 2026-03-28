@@ -52,6 +52,10 @@ struct LighterIocAck {
     double confirmed_size {0.0};  // Actual size filled (from position delta)
     double fill_price {0.0};      // Actual fill price (from value delta / size delta)
     double fee {0.0};             // Lighter fee (currently 0 for maker/taker on Lighter)
+    double nonce_fetch_latency_ms {0.0};
+    double sign_order_latency_ms {0.0};
+    double send_tx_ack_latency_ms {0.0};
+    double place_to_http_ack_latency_ms {0.0};
     double http_ack_latency_ms {0.0};
     double fill_confirm_latency_ms {0.0};
     int confirm_attempts {0};

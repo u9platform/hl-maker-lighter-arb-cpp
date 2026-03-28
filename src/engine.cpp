@@ -143,6 +143,10 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
         lighter_ack_ns - lighter_send_ns
     );
     PerfCollector::instance().record_trade_path(
+        PerfMetric::HlFillToLighterHttpAckTotalNs,
+        static_cast<std::uint64_t>(std::llround((ack.place_to_http_ack_latency_ms * 1000000.0) + static_cast<double>(lighter_send_ns - fill_rx_ns)))
+    );
+    PerfCollector::instance().record_trade_path(
         PerfMetric::MakerFillToTakerAckTotalNs,
         lighter_ack_ns - fill_rx_ns
     );
@@ -167,6 +171,10 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
                  << " hl_resting_ms=" << ((fill_rx_ns > perf_trace_.hl_ack_ns)
                         ? static_cast<double>(fill_rx_ns - perf_trace_.hl_ack_ns) / 1000000.0 : 0.0)
                  << " hl_fill_rx_to_lt_send_ms=" << static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0
+                 << " hl_fill_to_lt_http_ack_ms=" << (static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0 + ack.place_to_http_ack_latency_ms)
+                 << " lt_nonce_fetch_ms=" << ack.nonce_fetch_latency_ms
+                 << " lt_sign_order_ms=" << ack.sign_order_latency_ms
+                 << " lt_sendtx_ack_ms=" << ack.send_tx_ack_latency_ms
                  << " lt_send_to_http_ack_ms=" << ack.http_ack_latency_ms
                  << " lt_http_ack_to_fill_confirm_ms=" << ack.fill_confirm_latency_ms
                  << " lt_confirm_attempts=" << ack.confirm_attempts
@@ -223,6 +231,10 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
         unwind_perf << "perf trade oid=" << oid
                     << " hedge_status=unconfirmed"
                     << " hl_fill_rx_to_lt_send_ms=" << static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0
+                    << " hl_fill_to_lt_http_ack_ms=" << (static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0 + ack.place_to_http_ack_latency_ms)
+                    << " lt_nonce_fetch_ms=" << ack.nonce_fetch_latency_ms
+                    << " lt_sign_order_ms=" << ack.sign_order_latency_ms
+                    << " lt_sendtx_ack_ms=" << ack.send_tx_ack_latency_ms
                     << " lt_send_to_http_ack_ms=" << ack.http_ack_latency_ms
                     << " lt_http_ack_to_fill_confirm_ms=" << ack.fill_confirm_latency_ms
                     << " lt_confirm_attempts=" << ack.confirm_attempts
@@ -280,6 +292,10 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
         unwind_perf << "perf trade oid=" << oid
                     << " hedge_status=failed"
                     << " hl_fill_rx_to_lt_send_ms=" << static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0
+                    << " hl_fill_to_lt_http_ack_ms=" << (static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0 + ack.place_to_http_ack_latency_ms)
+                    << " lt_nonce_fetch_ms=" << ack.nonce_fetch_latency_ms
+                    << " lt_sign_order_ms=" << ack.sign_order_latency_ms
+                    << " lt_sendtx_ack_ms=" << ack.send_tx_ack_latency_ms
                     << " lt_send_to_http_ack_ms=" << ack.http_ack_latency_ms
                     << " lt_http_ack_to_fill_confirm_ms=" << ack.fill_confirm_latency_ms
                     << " lt_confirm_attempts=" << ack.confirm_attempts
