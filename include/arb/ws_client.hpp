@@ -36,7 +36,7 @@ class WsClient {
         std::string path {"/ws"};
         int ping_interval_sec {20};
         int reconnect_delay_ms {1000};
-        int max_reconnect_attempts {10};
+        int max_reconnect_attempts {0};  // 0 = unlimited
     };
 
     explicit WsClient(Config config);

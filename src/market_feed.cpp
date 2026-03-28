@@ -391,8 +391,9 @@ void HlFillFeed::start() {
 
     ws_ = std::make_unique<WsClient>(ws_cfg);
     ws_->set_on_message([this](const std::string& msg) { on_message(msg); });
-    ws_->set_on_disconnect([](const std::string& reason) {
-        std::cerr << "[hl-fills] disconnected: " << reason << '\n';
+    ws_->set_on_disconnect([this](const std::string& reason) {
+        std::cerr << "[hl-fills] disconnected: " << reason << ", will resubscribe on reconnect\n";
+        subscribed_.store(false, std::memory_order_release);
     });
     ws_->connect();
 }

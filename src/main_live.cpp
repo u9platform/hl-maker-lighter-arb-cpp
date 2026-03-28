@@ -266,13 +266,31 @@ int main() {
             last_log_tick = tick_count.load();
             const auto uptime_s = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - start_time).count();
+
+            const bool fills_ok = fill_feed && fill_feed->is_connected();
             std::cerr << "[telem] " << timestamp_str()
                       << " ticks=" << tick_count << " trades=" << trade_count
                       << " uptime=" << uptime_s << "s"
                       << " spread=" << std::fixed << std::setprecision(2) << snap.cross_spread_bps << "bps"
                       << " hl=" << snap.hl.bid << "/" << snap.hl.ask
                       << " lt=" << snap.lighter.bid << "/" << snap.lighter.ask
-                      << " state=" << static_cast<int>(engine.strategy().state()) << '\n';
+                      << " state=" << static_cast<int>(engine.strategy().state())
+                      << " fills_ws=" << (fills_ok ? "OK" : "DOWN") << '\n';
+
+            // Safety: if fill feed is down, activate kill switch to prevent new orders
+            // (fills won't be detected → naked positions)
+            if (!fills_ok && !risk.kill_switch_active()) {
+                risk.activate_kill_switch("fill feed disconnected");
+                std::cerr << "[risk] " << timestamp_str() << " KILL SWITCH: fill feed down, cancelling active orders\n";
+                // Cancel any active maker order
+                const auto& active = engine.active_hl_oid();
+                if (active.has_value()) {
+                    hl_exchange.cancel_order("HYPE", *active, dry_run);
+                }
+            } else if (fills_ok && risk.kill_switch_active() && risk.kill_switch_reason() == "fill feed disconnected") {
+                risk.reset_kill_switch();
+                std::cerr << "[risk] " << timestamp_str() << " kill switch reset (fill feed reconnected)\n";
+            }
         }
     }
 

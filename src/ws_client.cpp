@@ -232,7 +232,7 @@ void WsClient::schedule_reconnect() {
     if (closing_.load(std::memory_order_relaxed)) {
         return;
     }
-    if (reconnect_count_ >= config_.max_reconnect_attempts) {
+    if (config_.max_reconnect_attempts > 0 && reconnect_count_ >= config_.max_reconnect_attempts) {
         std::cerr << "[ws] max reconnect attempts reached, giving up\n";
         if (on_disconnect_) {
             on_disconnect_("max reconnect attempts");
