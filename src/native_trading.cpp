@@ -218,10 +218,13 @@ std::string NativeHyperliquidTrading::post_exchange_action(const std::string& ac
     const std::string signature = sign_l1_action(action_hash);
     const std::ostringstream payload;
     const std::string nonce_str = std::to_string(nonce);
+    const std::string vault_part = config_.vault_address.has_value()
+        ? "\"" + config_.vault_address.value() + "\""
+        : "null";
     std::string body = "{\"action\":" + action_json +
         ",\"nonce\":" + nonce_str +
         ",\"signature\":" + signature +
-        ",\"vaultAddress\":null,\"expiresAfter\":null}";
+        ",\"vaultAddress\":" + vault_part + ",\"expiresAfter\":null}";
     const HttpResponse response = http_post(config_.api_url + "/exchange", body, {{"Content-Type", "application/json"}});
     return response.body;
 }
