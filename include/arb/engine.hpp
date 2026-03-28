@@ -37,6 +37,7 @@ class MakerHedgeEngine {
 
     [[nodiscard]] const std::optional<std::string>& active_hl_oid() const noexcept;
     [[nodiscard]] const HlMakerLighterHedger& strategy() const noexcept;
+    [[nodiscard]] double hl_position_base() const noexcept;
 
   private:
     [[nodiscard]] std::vector<EventLog> execute_action(const Action& action, const SpreadSnapshot& snapshot);
@@ -54,6 +55,13 @@ class MakerHedgeEngine {
     // Remember the direction of the last maker order so partial fills
     // can hedge correctly even after strategy state is reset.
     Direction last_maker_direction_ {Direction::ShortLighterLongHl};
+    
+    // Track absolute HL position in base units for position limit enforcement.
+    // Positive = long, negative = short. Updated on each fill.
+    double hl_position_base_ {0.0};
+    
+    // Returns true if current position exceeds max_position_usd.
+    [[nodiscard]] bool position_limit_reached(double mid_price) const noexcept;
 };
 
 }  // namespace arb

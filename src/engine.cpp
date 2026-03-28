@@ -1,5 +1,6 @@
 #include "arb/engine.hpp"
 
+#include <cmath>
 #include <sstream>
 
 namespace arb {
@@ -27,8 +28,22 @@ SpreadSnapshot MakerHedgeEngine::collect_snapshot() const {
     };
 }
 
+bool MakerHedgeEngine::position_limit_reached(double mid_price) const noexcept {
+    if (mid_price <= 0.0) return false;
+    const double pos_usd = std::abs(hl_position_base_) * mid_price;
+    return pos_usd >= config_.strategy.max_position_usd;
+}
+
 std::vector<EventLog> MakerHedgeEngine::on_market_data(std::int64_t now_ms) {
     const SpreadSnapshot snapshot = collect_snapshot();
+    
+    // Position limit: if we're at max, don't open new positions.
+    // Force strategy to Idle so it doesn't place new maker orders.
+    if (position_limit_reached(snapshot.hl.mid()) &&
+        strategy_.state() == StrategyState::Idle) {
+        return {};  // Skip — at position limit
+    }
+    
     const Action action = strategy_.on_market_snapshot(snapshot, now_ms);
     return execute_action(action, snapshot);
 }
@@ -74,6 +89,10 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
     }
     events.push_back(EventLog {.message = msg.str()});
 
+    // Track HL position: buy adds, sell subtracts
+    const bool hl_is_buy = (dir == Direction::ShortLighterLongHl);  // HL buys when shorting Lighter
+    hl_position_base_ += hl_is_buy ? fill_size_base : -fill_size_base;
+
     // Reset strategy to Idle so it can immediately start looking for next trade
     strategy_.reset();
     active_hl_oid_.reset();
@@ -95,6 +114,10 @@ const std::optional<std::string>& MakerHedgeEngine::active_hl_oid() const noexce
 
 const HlMakerLighterHedger& MakerHedgeEngine::strategy() const noexcept {
     return strategy_;
+}
+
+double MakerHedgeEngine::hl_position_base() const noexcept {
+    return hl_position_base_;
 }
 
 std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, const SpreadSnapshot& snapshot) {

@@ -309,6 +309,7 @@ int main() {
                       << " hl=" << snap.hl.bid << "/" << snap.hl.ask
                       << " lt=" << snap.lighter.bid << "/" << snap.lighter.ask
                       << " state=" << static_cast<int>(engine.strategy().state())
+                      << " pos=" << std::setprecision(2) << engine.hl_position_base()
                       << " fills_ws=" << (fills_subscribed ? "SUBSCRIBED" : "NOT_SUBSCRIBED") << '\n';
 
             // Note: Kill switch logic for fill feed is now handled every tick above,
