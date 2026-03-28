@@ -1,4 +1,5 @@
 #include "arb/engine.hpp"
+#include "arb/hl_ws_post.hpp"
 #include "arb/journal.hpp"
 #include "arb/market_feed.hpp"
 #include "arb/native_trading.hpp"
@@ -127,6 +128,16 @@ int main() {
         .vault_address = std::nullopt,
         .coin = "HYPE",
     });
+    arb::HlWsPostTransport hl_ws_post;
+    hl_ws_post.start();
+    if (hl_ws_post.wait_until_connected(2000)) {
+        hl_native.set_action_transport([&hl_ws_post](const std::string& payload_json) {
+            return hl_ws_post.post_action(payload_json);
+        });
+        std::cerr << "[main] hl order transport=ws_post\n";
+    } else {
+        std::cerr << "[main] WARNING: hl ws_post transport unavailable, falling back to HTTP\n";
+    }
 
     arb::NativeLighterTrading lighter_native({
         .api_url = "https://mainnet.zklighter.elliot.ai",
@@ -348,6 +359,7 @@ int main() {
     // --- Shutdown ---
     std::cerr << "\n[main] shutting down...\n";
     journal.flush();
+    hl_ws_post.stop();
     feed.stop();
     if (fill_feed) fill_feed->stop();
 

@@ -139,6 +139,10 @@ std::string decode_and_free(char* ptr, FreeFn free_fn) {
 
 NativeHyperliquidTrading::NativeHyperliquidTrading(HyperliquidConfig config) : config_(std::move(config)) {}
 
+void NativeHyperliquidTrading::set_action_transport(ActionTransport transport) {
+    action_transport_ = std::move(transport);
+}
+
 Bbo NativeHyperliquidTrading::get_bbo(const std::string& coin) {
     const std::string payload = "{\"type\":\"l2Book\",\"coin\":\"" + coin + "\",\"nSigFigs\":5}";
     const HttpResponse response = http_post(config_.api_url + "/info", payload, {{"Content-Type", "application/json"}});
@@ -229,6 +233,9 @@ std::string NativeHyperliquidTrading::post_exchange_action(const std::string& ac
         ",\"nonce\":" + nonce_str +
         ",\"signature\":" + signature +
         ",\"vaultAddress\":" + vault_part + ",\"expiresAfter\":null}";
+    if (action_transport_) {
+        return action_transport_(body);
+    }
     const HttpResponse response = http_post(config_.api_url + "/exchange", body, {{"Content-Type", "application/json"}});
     return response.body;
 }

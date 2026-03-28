@@ -60,6 +60,7 @@ find_package(Boost 1.80 REQUIRED)
 find_package(OpenSSL REQUIRED)
 
 add_library(arb_ws
+    src/hl_ws_post.cpp
     src/ws_client.cpp
     src/market_feed.cpp
 )

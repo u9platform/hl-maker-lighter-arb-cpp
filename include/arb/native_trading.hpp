@@ -4,6 +4,7 @@
 #include "arb/exchange.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -28,7 +29,11 @@ struct LighterConfig {
 
 class NativeHyperliquidTrading final : public HyperliquidExchange {
   public:
+    using ActionTransport = std::function<std::string(const std::string&)>;
+
     explicit NativeHyperliquidTrading(HyperliquidConfig config);
+
+    void set_action_transport(ActionTransport transport);
 
     [[nodiscard]] Bbo get_bbo(const std::string& coin) override;
     [[nodiscard]] HlLimitOrderAck place_limit_order(const HlLimitOrderRequest& request) override;
@@ -54,6 +59,7 @@ class NativeHyperliquidTrading final : public HyperliquidExchange {
     void ensure_meta() const;
 
     HyperliquidConfig config_;
+    ActionTransport action_transport_;
     mutable std::unordered_map<std::string, MetaEntry> meta_;
 };
 
