@@ -158,18 +158,11 @@ void WsClient::on_ws_handshake(beast::error_code ec) {
     reconnect_count_ = 0;
     std::cerr << "[ws] connected to " << config_.host << config_.path << '\n';
 
-    // Flush pending sends.
-    for (const auto& msg : pending_sends_) {
-        ws_->async_write(
-            net::buffer(msg),
-            [](beast::error_code ec2, std::size_t) {
-                if (ec2) {
-                    std::cerr << "[ws] pending write error: " << ec2.message() << '\n';
-                }
-            }
-        );
-    }
+    // Flush pending sends serially (Beast requires no concurrent async_write).
+    // Copy and clear first, then chain writes.
+    auto pending = std::move(pending_sends_);
     pending_sends_.clear();
+    flush_pending(std::move(pending), 0);
 
     // Start read loop and ping timer.
     do_read();
@@ -250,6 +243,23 @@ void WsClient::schedule_reconnect() {
         }
         do_resolve();
     });
+}
+
+void WsClient::flush_pending(std::vector<std::string> msgs, std::size_t idx) {
+    if (idx >= msgs.size() || !connected_.load(std::memory_order_relaxed)) return;
+    // Capture msgs by value (shared_ptr would be cleaner, but this is small)
+    auto shared_msgs = std::make_shared<std::vector<std::string>>(std::move(msgs));
+    ws_->async_write(
+        net::buffer((*shared_msgs)[idx]),
+        [this, shared_msgs, idx](beast::error_code ec, std::size_t) {
+            if (ec) {
+                std::cerr << "[ws] pending write error: " << ec.message() << '\n';
+                return;
+            }
+            // Chain next write
+            flush_pending(std::move(*shared_msgs), idx + 1);
+        }
+    );
 }
 
 void WsClient::do_close() {

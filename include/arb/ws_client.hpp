@@ -72,6 +72,7 @@ class WsClient {
     void on_ping(beast::error_code ec);
     void schedule_reconnect();
     void do_close();
+    void flush_pending(std::vector<std::string> msgs, std::size_t idx);
 
     Config config_;
     net::io_context ioc_;
