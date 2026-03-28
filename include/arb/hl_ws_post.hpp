@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arb/exchange.hpp"
 #include "arb/ws_client.hpp"
 
 #include <atomic>
