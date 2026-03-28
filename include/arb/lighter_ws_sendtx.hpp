@@ -17,7 +17,8 @@ class LighterWsSendTxTransport {
         int timeout_ms {5000};
     };
 
-    explicit LighterWsSendTxTransport(Config config = {});
+    LighterWsSendTxTransport() : LighterWsSendTxTransport(Config{}) {}
+    explicit LighterWsSendTxTransport(Config config);
     ~LighterWsSendTxTransport();
 
     LighterWsSendTxTransport(const LighterWsSendTxTransport&) = delete;
