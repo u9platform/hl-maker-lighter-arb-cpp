@@ -9,6 +9,10 @@ namespace {
 
 constexpr std::uint64_t kNsPerMs = 1000ULL * 1000ULL;
 
+bool metric_uses_raw_ms(PerfMetric metric) {
+    return metric == PerfMetric::CrossVenueAlignmentMs;
+}
+
 }  // namespace
 
 PerfCollector& PerfCollector::instance() {
@@ -59,7 +63,7 @@ std::vector<std::string> PerfCollector::drain_summary_lines() {
             << " samples=" << count
             << " mean=";
 
-        if (unit_name(metric) == "ms") {
+        if (metric_uses_raw_ms(metric)) {
             oss.setf(std::ios::fixed);
             oss.precision(3);
             oss << (static_cast<double>(sum) / static_cast<double>(count));
