@@ -33,7 +33,7 @@ class HlWsPostTransport {
     [[nodiscard]] bool is_connected() const noexcept;
     [[nodiscard]] bool wait_until_connected(int timeout_ms) const;
 
-    [[nodiscard]] std::string post_action(const std::string& payload_json);
+    [[nodiscard]] HlActionTransportResult post_action(const std::string& payload_json);
 
   private:
     struct PendingResponse {
@@ -41,6 +41,7 @@ class HlWsPostTransport {
         std::condition_variable cv;
         bool ready {false};
         std::string body;
+        std::uint64_t response_rx_ns {0};
     };
 
     void on_message(const std::string& msg);

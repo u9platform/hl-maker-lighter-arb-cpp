@@ -181,15 +181,32 @@ HlLimitOrderAck NativeHyperliquidTrading::place_limit_order(const HlLimitOrderRe
     const std::uint64_t nonce = current_timestamp_ms();
     const std::string action_json = order_action_json(request, meta, false, false);
     const Bytes32 hash = order_action_hash(request, meta, false, false, nonce);
-    const std::string body = post_exchange_action(action_json, hash, nonce);
+    const HlActionResult result = post_exchange_action(action_json, hash, nonce);
+    const std::string& body = result.body;
 
     const std::regex resting(R"REGEX("resting":\{"oid":([0-9]+)\})REGEX");
     const std::regex filled(R"REGEX("filled":\{[^}]*"oid":([0-9]+))REGEX");
     std::smatch match;
     if (std::regex_search(body, match, resting) || std::regex_search(body, match, filled)) {
-        return HlLimitOrderAck {.ok = true, .message = "ok", .oid = match[1].str()};
+        return HlLimitOrderAck {
+            .ok = true,
+            .message = "ok",
+            .oid = match[1].str(),
+            .sign_latency_ms = result.sign_latency_ms,
+            .ws_send_call_latency_ms = result.ws_send_call_latency_ms,
+            .ws_send_to_response_rx_latency_ms = result.ws_send_to_response_rx_latency_ms,
+            .response_rx_to_unblock_latency_ms = result.response_rx_to_unblock_latency_ms,
+        };
     }
-    return HlLimitOrderAck {.ok = false, .message = body, .oid = ""};
+    return HlLimitOrderAck {
+        .ok = false,
+        .message = body,
+        .oid = "",
+        .sign_latency_ms = result.sign_latency_ms,
+        .ws_send_call_latency_ms = result.ws_send_call_latency_ms,
+        .ws_send_to_response_rx_latency_ms = result.ws_send_to_response_rx_latency_ms,
+        .response_rx_to_unblock_latency_ms = result.response_rx_to_unblock_latency_ms,
+    };
 }
 
 HlCancelAck NativeHyperliquidTrading::cancel_order(const std::string& coin, const std::string& oid, bool dry_run) {
@@ -199,7 +216,7 @@ HlCancelAck NativeHyperliquidTrading::cancel_order(const std::string& coin, cons
     const std::uint64_t nonce = current_timestamp_ms();
     const std::string action_json = cancel_action_json(coin, oid);
     const Bytes32 hash = cancel_action_hash(coin, oid, nonce);
-    const std::string body = post_exchange_action(action_json, hash, nonce);
+    const std::string body = post_exchange_action(action_json, hash, nonce).body;
     return HlCancelAck {.ok = body.find("\"status\":\"ok\"") != std::string::npos, .message = body, .oid = oid};
 }
 
@@ -220,7 +237,7 @@ HlReduceAck NativeHyperliquidTrading::reduce_position(const std::string& coin, b
     const std::uint64_t nonce = current_timestamp_ms();
     const std::string action_json = order_action_json(request, meta, true, true);
     const Bytes32 hash = order_action_hash(request, meta, true, true, nonce);
-    const std::string body = post_exchange_action(action_json, hash, nonce);
+    const std::string body = post_exchange_action(action_json, hash, nonce).body;
     const std::regex filled_size_pattern(R"REGEX("totalSz":"([^"]+)")REGEX");
     const std::regex avg_px_pattern(R"REGEX("avgPx":"([^"]+)")REGEX");
     return HlReduceAck {
@@ -240,8 +257,10 @@ const NativeHyperliquidTrading::MetaEntry& NativeHyperliquidTrading::meta_for_co
     return it->second;
 }
 
-std::string NativeHyperliquidTrading::post_exchange_action(const std::string& action_json, const Bytes32& action_hash, std::uint64_t nonce) const {
+NativeHyperliquidTrading::HlActionResult NativeHyperliquidTrading::post_exchange_action(const std::string& action_json, const Bytes32& action_hash, std::uint64_t nonce) const {
+    const std::uint64_t sign_start_ns = perf_now_ns();
     const std::string signature = sign_l1_action(action_hash);
+    const std::uint64_t sign_end_ns = perf_now_ns();
     const std::ostringstream payload;
     const std::string nonce_str = std::to_string(nonce);
     const std::string vault_part = config_.vault_address.has_value()
@@ -254,7 +273,14 @@ std::string NativeHyperliquidTrading::post_exchange_action(const std::string& ac
     if (!action_transport_) {
         throw std::runtime_error("Hyperliquid action transport unavailable: WS post transport is required");
     }
-    return action_transport_(body);
+    HlActionTransportResult transport = action_transport_(body);
+    return HlActionResult {
+        .body = std::move(transport.body),
+        .sign_latency_ms = static_cast<double>(sign_end_ns - sign_start_ns) / 1000000.0,
+        .ws_send_call_latency_ms = transport.send_call_latency_ms,
+        .ws_send_to_response_rx_latency_ms = transport.send_to_response_rx_latency_ms,
+        .response_rx_to_unblock_latency_ms = transport.response_rx_to_unblock_latency_ms,
+    };
 }
 
 std::string NativeHyperliquidTrading::sign_l1_action(const Bytes32& action_hash) const {

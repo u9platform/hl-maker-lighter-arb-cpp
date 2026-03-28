@@ -110,6 +110,16 @@ std::string make_error_body(const std::string& message) {
 
 }  // namespace
 
+namespace {
+std::uint64_t perf_now_ns_local() {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count()
+    );
+}
+}  // namespace
+
 HlWsPostTransport::HlWsPostTransport(Config config)
     : config_(std::move(config)),
       ws_(WsClient::Config {
@@ -148,7 +158,7 @@ bool HlWsPostTransport::wait_until_connected(int timeout_ms) const {
     return ws_.is_connected();
 }
 
-std::string HlWsPostTransport::post_action(const std::string& payload_json) {
+HlActionTransportResult HlWsPostTransport::post_action(const std::string& payload_json) {
     const std::uint64_t id = next_id_.fetch_add(1, std::memory_order_relaxed);
     auto pending = std::make_shared<PendingResponse>();
     {
@@ -159,7 +169,9 @@ std::string HlWsPostTransport::post_action(const std::string& payload_json) {
     std::ostringstream req;
     req << "{\"method\":\"post\",\"id\":" << id
         << ",\"request\":{\"type\":\"action\",\"payload\":" << payload_json << "}}";
+    const std::uint64_t send_start_ns = perf_now_ns_local();
     ws_.send(req.str());
+    const std::uint64_t send_end_ns = perf_now_ns_local();
 
     std::unique_lock lock(pending->mu);
     const bool ready = pending->cv.wait_for(
@@ -167,13 +179,24 @@ std::string HlWsPostTransport::post_action(const std::string& payload_json) {
         std::chrono::milliseconds(config_.timeout_ms),
         [&] { return pending->ready; }
     );
+    const std::uint64_t unblock_ns = perf_now_ns_local();
 
     if (!ready) {
         std::lock_guard pending_lock(pending_mu_);
         pending_.erase(id);
-        return make_error_body("ws_post_timeout");
+        return HlActionTransportResult {
+            .body = make_error_body("ws_post_timeout"),
+            .send_call_latency_ms = static_cast<double>(send_end_ns - send_start_ns) / 1000000.0,
+        };
     }
-    return pending->body;
+    return HlActionTransportResult {
+        .body = pending->body,
+        .send_call_latency_ms = static_cast<double>(send_end_ns - send_start_ns) / 1000000.0,
+        .send_to_response_rx_latency_ms = pending->response_rx_ns > send_end_ns
+            ? static_cast<double>(pending->response_rx_ns - send_end_ns) / 1000000.0 : 0.0,
+        .response_rx_to_unblock_latency_ms = unblock_ns > pending->response_rx_ns
+            ? static_cast<double>(unblock_ns - pending->response_rx_ns) / 1000000.0 : 0.0,
+    };
 }
 
 void HlWsPostTransport::on_message(const std::string& msg) {
@@ -209,6 +232,7 @@ void HlWsPostTransport::on_message(const std::string& msg) {
     {
         std::lock_guard lock(pending->mu);
         pending->body = std::move(body);
+        pending->response_rx_ns = perf_now_ns_local();
         pending->ready = true;
     }
     pending->cv.notify_all();

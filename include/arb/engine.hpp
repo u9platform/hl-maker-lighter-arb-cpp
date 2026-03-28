@@ -53,6 +53,10 @@ class MakerHedgeEngine {
         std::uint64_t signal_ns {0};
         std::uint64_t hl_send_ns {0};
         std::uint64_t hl_ack_ns {0};
+        double hl_sign_order_ms {0.0};
+        double hl_ws_send_call_ms {0.0};
+        double hl_ws_send_to_response_rx_ms {0.0};
+        double hl_response_rx_to_unblock_ms {0.0};
         std::uint64_t cancel_trigger_ns {0};
         std::uint64_t cancel_send_ns {0};
         std::uint64_t hl_fill_rx_ns {0};

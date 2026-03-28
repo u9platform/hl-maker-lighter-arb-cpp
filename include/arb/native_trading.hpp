@@ -30,7 +30,7 @@ struct LighterConfig {
 
 class NativeHyperliquidTrading final : public HyperliquidExchange {
   public:
-    using ActionTransport = std::function<std::string(const std::string&)>;
+    using ActionTransport = std::function<HlActionTransportResult(const std::string&)>;
 
     explicit NativeHyperliquidTrading(HyperliquidConfig config);
 
@@ -48,7 +48,15 @@ class NativeHyperliquidTrading final : public HyperliquidExchange {
     };
 
     [[nodiscard]] const MetaEntry& meta_for_coin(const std::string& coin) const;
-    [[nodiscard]] std::string post_exchange_action(const std::string& action_json, const Bytes32& action_hash, std::uint64_t nonce) const;
+    struct HlActionResult {
+        std::string body;
+        double sign_latency_ms {0.0};
+        double ws_send_call_latency_ms {0.0};
+        double ws_send_to_response_rx_latency_ms {0.0};
+        double response_rx_to_unblock_latency_ms {0.0};
+    };
+
+    [[nodiscard]] HlActionResult post_exchange_action(const std::string& action_json, const Bytes32& action_hash, std::uint64_t nonce) const;
     [[nodiscard]] std::string sign_l1_action(const Bytes32& action_hash) const;
     [[nodiscard]] std::string order_action_json(const HlLimitOrderRequest& request, const MetaEntry& meta, bool ioc, bool reduce_only) const;
     [[nodiscard]] std::string cancel_action_json(const std::string& coin, const std::string& oid) const;

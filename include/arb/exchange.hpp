@@ -9,6 +9,13 @@
 
 namespace arb {
 
+struct HlActionTransportResult {
+    std::string body;
+    double send_call_latency_ms {0.0};
+    double send_to_response_rx_latency_ms {0.0};
+    double response_rx_to_unblock_latency_ms {0.0};
+};
+
 struct HlLimitOrderRequest {
     std::string coin {"HYPE"};
     bool is_buy {true};
@@ -22,6 +29,10 @@ struct HlLimitOrderAck {
     bool ok {false};
     std::string message;
     std::string oid;
+    double sign_latency_ms {0.0};
+    double ws_send_call_latency_ms {0.0};
+    double ws_send_to_response_rx_latency_ms {0.0};
+    double response_rx_to_unblock_latency_ms {0.0};
 };
 
 struct HlCancelAck {

@@ -174,6 +174,10 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
                         ? static_cast<double>(perf_trace_.hl_send_ns - perf_trace_.signal_ns) / 1000000.0 : 0.0)
                  << " hl_send_to_ack_ms=" << ((perf_trace_.hl_ack_ns > perf_trace_.hl_send_ns)
                         ? static_cast<double>(perf_trace_.hl_ack_ns - perf_trace_.hl_send_ns) / 1000000.0 : 0.0)
+                 << " hl_sign_order_ms=" << perf_trace_.hl_sign_order_ms
+                 << " hl_ws_send_call_ms=" << perf_trace_.hl_ws_send_call_ms
+                 << " hl_ws_send_to_response_rx_ms=" << perf_trace_.hl_ws_send_to_response_rx_ms
+                 << " hl_response_rx_to_unblock_ms=" << perf_trace_.hl_response_rx_to_unblock_ms
                  << " hl_resting_ms=" << ((fill_rx_ns > perf_trace_.hl_ack_ns)
                         ? static_cast<double>(fill_rx_ns - perf_trace_.hl_ack_ns) / 1000000.0 : 0.0)
                  << " hl_fill_rx_to_lt_send_ms=" << static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0
@@ -425,6 +429,10 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             });
             const std::uint64_t hl_ack_ns = perf_now_ns();
             perf_trace_.hl_ack_ns = hl_ack_ns;
+            perf_trace_.hl_sign_order_ms = ack.sign_latency_ms;
+            perf_trace_.hl_ws_send_call_ms = ack.ws_send_call_latency_ms;
+            perf_trace_.hl_ws_send_to_response_rx_ms = ack.ws_send_to_response_rx_latency_ms;
+            perf_trace_.hl_response_rx_to_unblock_ms = ack.response_rx_to_unblock_latency_ms;
             PerfCollector::instance().record_trade_path(
                 PerfMetric::HlMakerSendToAckNs,
                 hl_ack_ns - hl_send_ns
