@@ -110,7 +110,7 @@ class HlFillFeed {
         std::string user_address;
     };
 
-    using FillCallback = std::function<void(const std::string& coin, double price, double size, bool is_buy, const std::string& oid)>;
+    using FillCallback = std::function<void(const std::string& coin, double price, double size, bool is_buy, const std::string& oid, double fee)>;
     using DisconnectCallback = std::function<void(const std::string& reason)>;
 
     explicit HlFillFeed(Config config);

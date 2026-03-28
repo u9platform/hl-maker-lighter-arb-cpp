@@ -147,6 +147,8 @@ struct ParsedFill {
     double size {0.0};
     bool is_buy {true};
     std::string oid;
+    double fee {0.0};
+    std::string fee_token;
 };
 
 bool parse_hl_fill(const std::string& msg, std::vector<ParsedFill>& fills) {
@@ -215,6 +217,32 @@ bool parse_hl_fill(const std::string& msg, std::vector<ParsedFill>& fills) {
                 auto oid_end = oid_start;
                 while (oid_end < msg.size() && msg[oid_end] != ',' && msg[oid_end] != '}' && msg[oid_end] != '"') ++oid_end;
                 fill.oid = msg.substr(oid_start, oid_end - oid_start);
+            }
+        }
+
+        // Fee — HL sends "fee":"0.001234" in fill events.
+        auto fee_pos = msg.find("\"fee\"", oid_pos != std::string::npos ? oid_pos : se);
+        if (fee_pos != std::string::npos && fee_pos < msg.find('}', se)) {
+            auto fs = msg.find('"', fee_pos + 5);
+            if (fs != std::string::npos) {
+                ++fs;
+                auto fe = msg.find('"', fs);
+                if (fe != std::string::npos) {
+                    try { fill.fee = std::stod(msg.substr(fs, fe - fs)); } catch (...) {}
+                }
+            }
+        }
+
+        // Fee token — "feeToken":"USDC"
+        auto ft_pos = msg.find("\"feeToken\"", fee_pos != std::string::npos ? fee_pos : se);
+        if (ft_pos != std::string::npos && ft_pos < msg.find('}', se) + 100) {
+            auto fts = msg.find('"', ft_pos + 10);
+            if (fts != std::string::npos) {
+                ++fts;
+                auto fte = msg.find('"', fts);
+                if (fte != std::string::npos) {
+                    fill.fee_token = msg.substr(fts, fte - fts);
+                }
             }
         }
 
@@ -458,7 +486,7 @@ void HlFillFeed::on_message(const std::string& msg) {
     std::vector<ParsedFill> fills;
     if (parse_hl_fill(msg, fills) && on_fill_) {
         for (const auto& fill : fills) {
-            on_fill_(fill.coin, fill.price, fill.size, fill.is_buy, fill.oid);
+            on_fill_(fill.coin, fill.price, fill.size, fill.is_buy, fill.oid, fill.fee);
         }
     }
 }

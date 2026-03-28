@@ -434,6 +434,8 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
             .message = "dry-run",
             .tx_hash = "dry_tx",
             .confirmed_size = request.size,
+            .fill_price = request.price,
+            .fee = 0.0,
             .http_ack_latency_ms = 0.0,
             .fill_confirm_latency_ms = 0.0,
             .confirm_attempts = 0,
@@ -441,8 +443,9 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     }
     ensure_client();
 
-    // Snapshot position BEFORE sending order
-    const double pos_before = query_position();
+    // Snapshot position BEFORE sending order (with avg_entry for fill price calc)
+    const auto snap_before = query_position_snapshot();
+    const double pos_before = snap_before.size;
     const std::uint64_t submit_start_ns = perf_now_ns();
 
     const auto next_nonce_value = next_nonce();
@@ -535,26 +538,37 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     // Poll position up to 3 times with increasing delay
     bool fill_confirmed = false;
     double confirmed_size = 0.0;
+    double fill_price = 0.0;
     int confirm_attempts = 0;
     std::uint64_t fill_confirm_latency_ns = 0;
     for (int attempt = 0; attempt < 3; ++attempt) {
         confirm_attempts = attempt + 1;
         std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
-        const double pos_after = query_position();
-        const double delta = std::abs(pos_after - pos_before);
+        const auto snap_after = query_position_snapshot();
+        const double delta = std::abs(snap_after.size - pos_before);
         if (delta > 0.001) {  // Position changed — fill confirmed
             fill_confirmed = true;
             confirmed_size = delta;
+            // Compute actual fill price from avg_entry change:
+            // new_value = old_value + fill_sz * fill_px
+            // fill_px = (new_pos * new_avg - old_pos * old_avg) / delta
+            const double value_before = std::abs(pos_before) * snap_before.avg_entry_price;
+            const double value_after = std::abs(snap_after.size) * snap_after.avg_entry_price;
+            if (delta > 0.0001) {
+                fill_price = std::abs(value_after - value_before) / delta;
+            }
             fill_confirm_latency_ns = perf_now_ns() - http_ack_ns;
             PerfCollector::instance().record_trade_path(
                 PerfMetric::LighterHttpAckToFillConfirmNs,
                 fill_confirm_latency_ns
             );
-            std::cerr << "[lighter-debug] fill CONFIRMED: pos " << pos_before << " -> " << pos_after
-                      << " delta=" << delta << " (attempt " << (attempt + 1) << ")\n";
+            std::cerr << "[lighter-debug] fill CONFIRMED: pos " << pos_before << " -> " << snap_after.size
+                      << " delta=" << delta << " fill_px=" << fill_price
+                      << " avg_entry " << snap_before.avg_entry_price << " -> " << snap_after.avg_entry_price
+                      << " (attempt " << (attempt + 1) << ")\n";
             break;
         }
-        std::cerr << "[lighter-debug] fill NOT confirmed yet, pos=" << pos_after
+        std::cerr << "[lighter-debug] fill NOT confirmed yet, pos=" << snap_after.size
                   << " (attempt " << (attempt + 1) << ", waiting " << wait_ms << "ms more)\n";
         wait_ms = std::min(wait_ms * 2, static_cast<std::uint64_t>(2000));
     }
@@ -574,43 +588,54 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
         .message = response.body,
         .tx_hash = confirmed_tx_hash,
         .confirmed_size = confirmed_size,
+        .fill_price = fill_price,
+        .fee = 0.0,  // Lighter currently charges 0 fees
         .http_ack_latency_ms = static_cast<double>(http_ack_latency_ns) / 1000000.0,
         .fill_confirm_latency_ms = static_cast<double>(fill_confirm_latency_ns) / 1000000.0,
         .confirm_attempts = confirm_attempts,
     };
 }
 
-double NativeLighterTrading::query_position() const {
+NativeLighterTrading::PositionSnapshot NativeLighterTrading::query_position_snapshot() const {
     const HttpResponse response = http_get(
         config_.api_url + "/api/v1/account?by=index&value=" + std::to_string(config_.account_index)
     );
-    // Parse position for our market from the account response
-    // Look for: "market_id":24 ... "sign":-1 ... "position":"0.85"
     const std::string& body = response.body;
 
-    // Find the positions array section for our market
     const std::string market_key = "\"market_id\":" + std::to_string(config_.market_index);
     const auto market_pos = body.find(market_key);
     if (market_pos == std::string::npos) {
-        return 0.0;  // No position in this market
+        return {};  // No position in this market
     }
 
-    // Extract sign and position from the same object
-    // Search within a reasonable window after market_id
-    const std::string section = body.substr(market_pos, 500);
+    const std::string section = body.substr(market_pos, 600);
     const std::regex sign_pattern(R"REGEX("sign":(-?[0-9]+))REGEX");
     const std::regex pos_pattern(R"REGEX("position":"([^"]+)")REGEX");
+    const std::regex avg_pattern(R"REGEX("avg_entry_price":"([^"]+)")REGEX");
+    const std::regex val_pattern(R"REGEX("position_value":"([^"]+)")REGEX");
 
-    std::smatch sign_match, pos_match;
+    std::smatch match;
+    PositionSnapshot snap;
     int sign = 0;
     double position = 0.0;
-    if (std::regex_search(section, sign_match, sign_pattern)) {
-        sign = std::stoi(sign_match[1].str());
+    if (std::regex_search(section, match, sign_pattern)) {
+        sign = std::stoi(match[1].str());
     }
-    if (std::regex_search(section, pos_match, pos_pattern)) {
-        position = std::stod(pos_match[1].str());
+    if (std::regex_search(section, match, pos_pattern)) {
+        position = std::stod(match[1].str());
     }
-    return sign * position;  // Negative for short, positive for long
+    snap.size = sign * position;
+    if (std::regex_search(section, match, avg_pattern)) {
+        snap.avg_entry_price = std::stod(match[1].str());
+    }
+    if (std::regex_search(section, match, val_pattern)) {
+        snap.position_value = std::stod(match[1].str());
+    }
+    return snap;
+}
+
+double NativeLighterTrading::query_position() const {
+    return query_position_snapshot().size;
 }
 
 void NativeLighterTrading::ensure_client() {

@@ -39,6 +39,7 @@ struct FillEvent {
     double size;
     bool is_buy;
     std::string oid;
+    double fee {0.0};
     std::uint64_t local_rx_ns {0};
 };
 
@@ -200,12 +201,12 @@ int main() {
         fill_cfg.user_address = hl_user_address;
         fill_feed = std::make_unique<arb::HlFillFeed>(fill_cfg);
 
-        fill_feed->set_on_fill([&](const std::string& coin, double price, double size, bool is_buy, const std::string& oid) {
+        fill_feed->set_on_fill([&](const std::string& coin, double price, double size, bool is_buy, const std::string& oid, double fee) {
             if (coin != "HYPE") return;
             // Enqueue fill event — processed on main thread to avoid data races on engine state.
             {
                 std::lock_guard lock(g_fill_mu);
-                g_fill_queue.push(FillEvent {coin, price, size, is_buy, oid, arb::perf_now_ns()});
+                g_fill_queue.push(FillEvent {coin, price, size, is_buy, oid, fee, arb::perf_now_ns()});
             }
             g_cv.notify_one();  // Wake main loop immediately.
         });
@@ -265,11 +266,12 @@ int main() {
 
                 std::cerr << "[fill] " << timestamp_str()
                           << " " << fill.coin << " px=" << fill.price << " sz=" << fill.size
-                          << " " << (fill.is_buy ? "BUY" : "SELL") << " oid=" << fill.oid << '\n';
+                          << " " << (fill.is_buy ? "BUY" : "SELL") << " oid=" << fill.oid
+                          << " fee=" << fill.fee << '\n';
 
                 // BUG FIX 3: Pass the OID to engine so it can handle the race condition
                 const auto fill_snap = feed.snapshot();
-                const auto logs = engine.on_hl_fill(fill.price, fill.size, fill_snap, fill.oid, fill.local_rx_ns);
+                const auto logs = engine.on_hl_fill(fill.price, fill.size, fill_snap, fill.oid, fill.local_rx_ns, fill.fee);
                 for (const auto& log : logs) {
                     std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
                 }

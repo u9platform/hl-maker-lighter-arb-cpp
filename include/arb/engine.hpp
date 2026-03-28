@@ -35,7 +35,7 @@ class MakerHedgeEngine {
 
     [[nodiscard]] SpreadSnapshot collect_snapshot() const;
     [[nodiscard]] std::vector<EventLog> on_market_data(std::int64_t now_ms);
-    [[nodiscard]] std::vector<EventLog> on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, const std::string& oid, std::uint64_t fill_rx_ns);
+    [[nodiscard]] std::vector<EventLog> on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, const std::string& oid, std::uint64_t fill_rx_ns, double hl_fee = 0.0);
     [[nodiscard]] std::vector<EventLog> on_lighter_hedge_reject();
     void on_lighter_hedge_fill(double fill_price);
 

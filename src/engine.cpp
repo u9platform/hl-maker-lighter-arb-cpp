@@ -76,7 +76,7 @@ std::vector<EventLog> MakerHedgeEngine::on_market_data(std::int64_t now_ms) {
     return execute_action(action, snapshot);
 }
 
-std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, const std::string& oid, std::uint64_t fill_rx_ns) {
+std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, const std::string& oid, std::uint64_t fill_rx_ns, double hl_fee) {
     // BUG FIX 3: Check if this fill belongs to any recently placed order, not just the current active one.
     if (recently_placed_oids_.find(oid) == recently_placed_oids_.end()) {
         return {};
@@ -134,9 +134,10 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
     std::ostringstream perf_msg;
     if (ack.ok && ack.fill_confirmed) {
         msg << "TRADE COMPLETE: hl_px=" << fill_price << " sz=" << fill_size_base
-            << " lt_confirmed_sz=" << ack.confirmed_size
+            << " lt_fill_px=" << ack.fill_price << " lt_sz=" << ack.confirmed_size
             << " lt_hedge tx=" << ack.tx_hash
-            << " spread=" << snapshot.cross_spread_bps;
+            << " spread=" << snapshot.cross_spread_bps
+            << " hl_fee=" << hl_fee;
         // Track HL position: buy adds, sell subtracts
         const bool hl_is_buy = (dir == Direction::ShortLighterLongHl);
         hl_position_base_ += hl_is_buy ? fill_size_base : -fill_size_base;
@@ -154,15 +155,27 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
                  << " lt_send_to_ack_ms=" << static_cast<double>(lighter_ack_ns - lighter_send_ns) / 1000000.0
                  << " hedge_total_ms=" << static_cast<double>(lighter_ack_ns - fill_rx_ns) / 1000000.0;
         if (journal_) {
+            const double maker_resting = (fill_rx_ns > perf_trace_.hl_ack_ns && perf_trace_.hl_ack_ns > 0)
+                ? static_cast<double>(fill_rx_ns - perf_trace_.hl_ack_ns) / 1000000.0 : 0.0;
+            const double hedge_total = static_cast<double>(lighter_ack_ns - fill_rx_ns) / 1000000.0;
             journal_->record(JournalEntry {
+                .trade_id = now_us(),
                 .timestamp_us = now_us(),
                 .type = 'T',
+                .hedge_status = "filled",
+                .hl_fill_timestamp_us = static_cast<std::int64_t>(fill_rx_ns / 1000),
+                .lighter_fill_timestamp_us = static_cast<std::int64_t>(lighter_ack_ns / 1000),
                 .hl_side = hl_is_buy ? 'B' : 'S',
                 .hl_px = fill_price,
                 .hl_sz = fill_size_base,
-                .lt_px = hedge_price,
+                .hl_fee = hl_fee,
+                .lt_fill_px = ack.fill_price,
                 .lt_sz = ack.confirmed_size,
+                .lt_fee = ack.fee,
                 .spread_bps = snapshot.cross_spread_bps,
+                .signal_spread_bps = 0.0,
+                .maker_resting_ms = maker_resting,
+                .hedge_total_ms = hedge_total,
                 .hl_oid = oid,
                 .lt_tx = ack.tx_hash,
             });
@@ -202,16 +215,22 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
         events.push_back(EventLog {.message = unwind_perf.str()});
         if (journal_) {
             journal_->record(JournalEntry {
+                .trade_id = now_us(),
                 .timestamp_us = now_us(),
                 .type = 'U',
+                .hedge_status = "unconfirmed_then_unwind",
+                .hl_fill_timestamp_us = static_cast<std::int64_t>(fill_rx_ns / 1000),
                 .hl_side = is_ask ? 'S' : 'B',
                 .hl_px = fill_price,
                 .hl_sz = fill_size_base,
-                .lt_px = 0.0,
-                .lt_sz = 0.0,
+                .hl_fee = hl_fee,
                 .spread_bps = snapshot.cross_spread_bps,
+                .hedge_total_ms = static_cast<double>(lighter_ack_ns - fill_rx_ns) / 1000000.0,
                 .hl_oid = oid,
                 .lt_tx = ack.tx_hash,
+                .unwind_fill_px = unwind.avg_fill_price,
+                .unwind_fill_sz = unwind.filled_size,
+                .failure_reason = "lighter_unconfirmed",
             });
         }
         strategy_.reset();
@@ -253,16 +272,21 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
         events.push_back(EventLog {.message = unwind_perf.str()});
         if (journal_) {
             journal_->record(JournalEntry {
+                .trade_id = now_us(),
                 .timestamp_us = now_us(),
                 .type = 'F',
+                .hedge_status = "failed",
+                .hl_fill_timestamp_us = static_cast<std::int64_t>(fill_rx_ns / 1000),
                 .hl_side = is_ask ? 'S' : 'B',
                 .hl_px = fill_price,
                 .hl_sz = fill_size_base,
-                .lt_px = 0.0,
-                .lt_sz = 0.0,
+                .hl_fee = hl_fee,
                 .spread_bps = snapshot.cross_spread_bps,
+                .hedge_total_ms = static_cast<double>(lighter_ack_ns - fill_rx_ns) / 1000000.0,
                 .hl_oid = oid,
-                .lt_tx = "",
+                .unwind_fill_px = unwind.avg_fill_price,
+                .unwind_fill_sz = unwind.filled_size,
+                .failure_reason = ack.message.substr(0, 100),
             });
         }
         strategy_.reset();

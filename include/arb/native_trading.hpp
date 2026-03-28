@@ -77,6 +77,12 @@ class NativeLighterTrading final : public LighterExchange {
     [[nodiscard]] std::int64_t scaled_size(double size) const;
     [[nodiscard]] std::uint32_t scaled_price(double price) const;
     [[nodiscard]] static std::string json_escape(const std::string& value);
+    struct PositionSnapshot {
+        double size {0.0};           // Signed position (negative = short)
+        double avg_entry_price {0.0};
+        double position_value {0.0};
+    };
+    [[nodiscard]] PositionSnapshot query_position_snapshot() const;
     [[nodiscard]] double query_position() const;
 
     LighterConfig config_;

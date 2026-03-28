@@ -50,6 +50,8 @@ struct LighterIocAck {
     std::string message;
     std::string tx_hash;
     double confirmed_size {0.0};  // Actual size filled (from position delta)
+    double fill_price {0.0};      // Actual fill price (from value delta / size delta)
+    double fee {0.0};             // Lighter fee (currently 0 for maker/taker on Lighter)
     double http_ack_latency_ms {0.0};
     double fill_confirm_latency_ms {0.0};
     int confirm_attempts {0};
