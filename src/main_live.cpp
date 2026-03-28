@@ -407,6 +407,22 @@ int main() {
         } else if (fills_subscribed && risk.kill_switch_active() && 
                    (risk.kill_switch_reason() == "fill feed not subscribed" || 
                     risk.kill_switch_reason().find("fill feed disconnected") != std::string::npos)) {
+            // Position reconciliation: check if fills were missed during disconnect
+            const double engine_pos = engine.hl_position_base();
+            const double actual_pos = query_hl_position(
+                env_or("HL_API_URL", "https://api.hyperliquid.xyz"),
+                env_or("HL_USER_ADDRESS", ""),
+                engine_config.hl_coin
+            );
+            if (std::abs(actual_pos - engine_pos) > 0.001) {
+                std::cerr << "[risk] " << timestamp_str()
+                          << " POSITION MISMATCH after fill feed reconnect!"
+                          << " engine=" << engine_pos << " actual=" << actual_pos
+                          << " diff=" << (actual_pos - engine_pos) << "\n";
+                engine.set_hl_position(actual_pos);
+                std::cerr << "[risk] " << timestamp_str()
+                          << " synced engine position to " << actual_pos << "\n";
+            }
             risk.reset_kill_switch();
             std::cerr << "[risk] " << timestamp_str() << " kill switch reset (fill feed reconnected and subscribed)\n";
         }
