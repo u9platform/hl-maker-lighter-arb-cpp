@@ -380,6 +380,7 @@ void MarketFeed::on_hl_message(const std::string& msg) {
     
     // HL WS protocol: we send subscribe, then get subscriptionResponse, then data.
     if (msg.find("subscriptionResponse") != std::string::npos) {
+        std::cerr << "[hl-ws] got subscriptionResponse: " << msg.substr(0, 200) << '\n';
         if (msg.find("\"bbo\"") != std::string::npos && !hl_subscribed_.load(std::memory_order_relaxed)) {
             hl_subscribed_.store(true, std::memory_order_release);
             std::cerr << "[hl-ws] subscribed to bbo:" << config_.hl_coin << '\n';
@@ -458,6 +459,9 @@ void MarketFeed::subscribe_hl() {
         const std::string sub_trades = "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"trades\",\"coin\":\"" +
             config_.hl_coin + "\"}}";
         hl_ws_->send(sub_trades);
+        std::cerr << "[hl-ws] sent trades subscribe for " << config_.hl_coin << '\n';
+    } else {
+        std::cerr << "[hl-ws] WARNING: on_trade_ not set, skipping trades subscribe\n";
     }
 }
 
