@@ -77,7 +77,7 @@ std::vector<EventLog> MakerHedgeEngine::on_market_data(std::int64_t now_ms) {
     }
     
     const std::uint64_t decision_start_ns = perf_now_ns();
-    const Action action = strategy_.on_market_snapshot(snapshot, now_ms);
+    const Action action = strategy_.on_market_snapshot(snapshot, now_ms, hl_position_base_);
     const std::uint64_t decision_end_ns = perf_now_ns();
     PerfCollector::instance().record_hot_path(
         PerfMetric::StrategyDecisionNs,

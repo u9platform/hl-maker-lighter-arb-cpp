@@ -47,29 +47,33 @@ const std::optional<OpenHedgePosition>& HlMakerLighterHedger::open_position() co
     return open_position_;
 }
 
-Action HlMakerLighterHedger::on_market_snapshot(const SpreadSnapshot& snapshot, std::int64_t now_ms) {
+Action HlMakerLighterHedger::on_market_snapshot(const SpreadSnapshot& snapshot, std::int64_t now_ms, double hl_position_base) {
     if (!snapshot.valid(config_.max_quote_age_ms)) {
         return {};
     }
 
     const double abs_spread = std::abs(snapshot.cross_spread_bps);
+    const double threshold = effective_spread_bps(snapshot.cross_spread_bps, hl_position_base);
+
     if (state_ == StrategyState::Idle) {
-        if (abs_spread < config_.spread_bps || !can_arm(now_ms)) {
+        if (abs_spread < threshold || !can_arm(now_ms)) {
             return {};
         }
 
         pending_maker_ = build_maker_order(snapshot);
+        pending_maker_->entry_spread_bps = threshold;  // remember which threshold was used
         state_ = StrategyState::PendingHlMaker;
 
         Action action;
         action.type = ActionType::PlaceHlMaker;
-        action.reason = "spread reached entry threshold";
+        action.reason = (threshold < config_.spread_bps) ? "spread reached close threshold" : "spread reached entry threshold";
         action.maker_order = pending_maker_;
         return action;
     }
 
     if (state_ == StrategyState::PendingHlMaker && pending_maker_.has_value()) {
-        if (abs_spread < cancel_threshold_bps()) {
+        const double cancel_thresh = cancel_threshold_bps(pending_maker_->entry_spread_bps);
+        if (abs_spread < cancel_thresh) {
             Action action;
             action.type = ActionType::CancelHlMaker;
             action.reason = "spread mean-reverted below cancel threshold";
@@ -91,9 +95,10 @@ Action HlMakerLighterHedger::on_market_snapshot(const SpreadSnapshot& snapshot, 
 
     // If we sent a cancel but haven't confirmed it yet, check if we should re-arm.
     if (state_ == StrategyState::CancelledPendingConfirm) {
-        if (abs_spread >= config_.spread_bps && can_arm(now_ms)) {
+        if (abs_spread >= threshold && can_arm(now_ms)) {
             // Spread widened again — place a new maker order (overwrite old pending_maker_)
             pending_maker_ = build_maker_order(snapshot);
+            pending_maker_->entry_spread_bps = threshold;
             state_ = StrategyState::PendingHlMaker;
 
             Action action;
@@ -165,8 +170,24 @@ bool HlMakerLighterHedger::can_arm(std::int64_t now_ms) const noexcept {
     return (now_ms - last_disarm_ms_) >= config_.min_rearm_ms;
 }
 
-double HlMakerLighterHedger::cancel_threshold_bps() const noexcept {
-    const double threshold = config_.spread_bps - config_.cancel_band_bps;
+double HlMakerLighterHedger::effective_spread_bps(double cross_spread_bps, double hl_position_base) const noexcept {
+    const double close_bps = config_.close_spread_bps > 0.0 ? config_.close_spread_bps : config_.spread_bps;
+    if (close_bps >= config_.spread_bps) {
+        return config_.spread_bps;  // no benefit, use open threshold
+    }
+
+    // Determine if this trade direction would reduce position
+    const Direction dir = direction_for_spread(cross_spread_bps);
+    // ShortLighterLongHl = buy on HL (reduces short, increases long)
+    // LongLighterShortHl = sell on HL (reduces long, increases short)
+    const bool would_reduce = (hl_position_base < 0.0 && dir == Direction::ShortLighterLongHl) ||
+                              (hl_position_base > 0.0 && dir == Direction::LongLighterShortHl);
+
+    return would_reduce ? close_bps : config_.spread_bps;
+}
+
+double HlMakerLighterHedger::cancel_threshold_bps(double entry_spread_bps) const noexcept {
+    const double threshold = entry_spread_bps - config_.cancel_band_bps;
     return threshold > 0.0 ? threshold : 0.0;
 }
 

@@ -148,6 +148,7 @@ int main() {
     const bool dry_run = env_or("DRY_RUN", "true") == "true";
 
     const double spread_bps = env_double("SPREAD_BPS", 2.0);
+    const double close_spread_bps = env_double("CLOSE_SPREAD_BPS", 0.0);  // 0 = same as spread_bps
     const double cancel_band = env_double("CANCEL_BAND_BPS", 0.5);
     const double pair_size = env_double("PAIR_SIZE_USD", 25.0);
     const double max_pos = env_double("MAX_POSITION_USD", 100.0);
@@ -156,7 +157,7 @@ int main() {
               << "version=" << ARB_GIT_VERSION
               << " "
               << "dry_run=" << (dry_run ? "true" : "false")
-              << " spread=" << spread_bps << " cancel_band=" << cancel_band
+              << " spread=" << spread_bps << " close_spread=" << (close_spread_bps > 0.0 ? close_spread_bps : spread_bps) << " cancel_band=" << cancel_band
               << " pair_size=" << pair_size << " max_pos=" << max_pos
               << " hl_interval=" << env_or("HL_ORDER_INTERVAL_MS", "200") << "ms"
               << " lt_interval=" << env_or("LIGHTER_ORDER_INTERVAL_MS", "500") << "ms\n";
@@ -232,6 +233,7 @@ int main() {
     // --- Engine (uses WS exchange adapters) ---
     arb::EngineConfig engine_config;
     engine_config.strategy.spread_bps = spread_bps;
+    engine_config.strategy.close_spread_bps = close_spread_bps;
     engine_config.strategy.cancel_band_bps = cancel_band;
     engine_config.strategy.pair_size_usd = pair_size;
     engine_config.strategy.max_position_usd = max_pos;

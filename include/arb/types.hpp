@@ -54,6 +54,7 @@ struct SpreadSnapshot {
 
 struct StrategyConfig {
     double spread_bps {2.0};
+    double close_spread_bps {0.0};   // 0 = use spread_bps for both open/close
     double cancel_band_bps {0.5};
     double pair_size_usd {25.0};
     double max_position_usd {100.0};
@@ -67,6 +68,7 @@ struct PendingMakerOrder {
     double price {0.0};
     double size_base {0.0};
     double trigger_spread_bps {0.0};
+    double entry_spread_bps {0.0};  // threshold used (open or close), for cancel band calc
 };
 
 struct OpenHedgePosition {
