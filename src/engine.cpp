@@ -148,6 +148,9 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
                  << " hl_resting_ms=" << ((fill_rx_ns > perf_trace_.hl_ack_ns)
                         ? static_cast<double>(fill_rx_ns - perf_trace_.hl_ack_ns) / 1000000.0 : 0.0)
                  << " hl_fill_rx_to_lt_send_ms=" << static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0
+                 << " lt_send_to_http_ack_ms=" << ack.http_ack_latency_ms
+                 << " lt_http_ack_to_fill_confirm_ms=" << ack.fill_confirm_latency_ms
+                 << " lt_confirm_attempts=" << ack.confirm_attempts
                  << " lt_send_to_ack_ms=" << static_cast<double>(lighter_ack_ns - lighter_send_ns) / 1000000.0
                  << " hedge_total_ms=" << static_cast<double>(lighter_ack_ns - fill_rx_ns) / 1000000.0;
         if (journal_) {
@@ -189,6 +192,9 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
         unwind_perf << "perf trade oid=" << oid
                     << " hedge_status=unconfirmed"
                     << " hl_fill_rx_to_lt_send_ms=" << static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0
+                    << " lt_send_to_http_ack_ms=" << ack.http_ack_latency_ms
+                    << " lt_http_ack_to_fill_confirm_ms=" << ack.fill_confirm_latency_ms
+                    << " lt_confirm_attempts=" << ack.confirm_attempts
                     << " lt_send_to_ack_ms=" << static_cast<double>(lighter_ack_ns - lighter_send_ns) / 1000000.0
                     << " hedge_total_ms=" << static_cast<double>(lighter_ack_ns - fill_rx_ns) / 1000000.0
                     << " hedge_fail_to_unwind_send_ms=" << static_cast<double>(unwind_send_ns - lighter_ack_ns) / 1000000.0
@@ -237,6 +243,9 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
         unwind_perf << "perf trade oid=" << oid
                     << " hedge_status=failed"
                     << " hl_fill_rx_to_lt_send_ms=" << static_cast<double>(lighter_send_ns - fill_rx_ns) / 1000000.0
+                    << " lt_send_to_http_ack_ms=" << ack.http_ack_latency_ms
+                    << " lt_http_ack_to_fill_confirm_ms=" << ack.fill_confirm_latency_ms
+                    << " lt_confirm_attempts=" << ack.confirm_attempts
                     << " lt_send_to_ack_ms=" << static_cast<double>(lighter_ack_ns - lighter_send_ns) / 1000000.0
                     << " hedge_total_ms=" << static_cast<double>(lighter_ack_ns - fill_rx_ns) / 1000000.0
                     << " hedge_fail_to_unwind_send_ms=" << static_cast<double>(unwind_send_ns - lighter_ack_ns) / 1000000.0

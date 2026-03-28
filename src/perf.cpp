@@ -100,6 +100,8 @@ std::string PerfCollector::metric_name(PerfMetric metric) {
         case PerfMetric::CancelTriggerToHlCancelSendNs: return "cancel_trigger_to_hl_cancel_send";
         case PerfMetric::HlCancelSendToAckNs: return "hl_cancel_send_to_ack";
         case PerfMetric::HlFillLocalRxToLighterSendNs: return "hl_fill_local_rx_to_lighter_send";
+        case PerfMetric::LighterSendToHttpAckNs: return "lighter_send_to_http_ack";
+        case PerfMetric::LighterHttpAckToFillConfirmNs: return "lighter_http_ack_to_fill_confirm";
         case PerfMetric::LighterSendToAckNs: return "lighter_send_to_ack";
         case PerfMetric::MakerFillToTakerAckTotalNs: return "maker_fill_to_taker_ack_total";
         case PerfMetric::HedgeFailureToUnwindSendNs: return "hedge_failure_to_unwind_send";

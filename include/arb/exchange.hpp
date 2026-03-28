@@ -50,6 +50,9 @@ struct LighterIocAck {
     std::string message;
     std::string tx_hash;
     double confirmed_size {0.0};  // Actual size filled (from position delta)
+    double http_ack_latency_ms {0.0};
+    double fill_confirm_latency_ms {0.0};
+    int confirm_attempts {0};
 };
 
 struct FillEvent {

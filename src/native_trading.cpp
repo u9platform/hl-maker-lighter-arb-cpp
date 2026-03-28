@@ -2,6 +2,7 @@
 
 #include "arb/http.hpp"
 #include "arb/msgpack.hpp"
+#include "arb/perf.hpp"
 
 #include <secp256k1.h>
 #include <secp256k1_recovery.h>
@@ -420,12 +421,22 @@ Bbo NativeLighterTrading::get_bbo(std::int64_t market_id) {
 
 LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& request) {
     if (request.dry_run) {
-        return LighterIocAck {.ok = true, .fill_confirmed = true, .message = "dry-run", .tx_hash = "dry_tx", .confirmed_size = request.size};
+        return LighterIocAck {
+            .ok = true,
+            .fill_confirmed = true,
+            .message = "dry-run",
+            .tx_hash = "dry_tx",
+            .confirmed_size = request.size,
+            .http_ack_latency_ms = 0.0,
+            .fill_confirm_latency_ms = 0.0,
+            .confirm_attempts = 0,
+        };
     }
     ensure_client();
 
     // Snapshot position BEFORE sending order
     const double pos_before = query_position();
+    const std::uint64_t submit_start_ns = perf_now_ns();
 
     const auto next_nonce_value = next_nonce();
     const auto* signer = static_cast<LighterSignerHandle*>(signer_lib_);
@@ -453,7 +464,16 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     const std::string tx_hash = decode_and_free(result.txHash, signer->free_fn());
     decode_and_free(result.messageToSign, signer->free_fn());
     if (!err.empty()) {
-        return LighterIocAck {.ok = false, .fill_confirmed = false, .message = err, .tx_hash = "", .confirmed_size = 0.0};
+        return LighterIocAck {
+            .ok = false,
+            .fill_confirmed = false,
+            .message = err,
+            .tx_hash = "",
+            .confirmed_size = 0.0,
+            .http_ack_latency_ms = 0.0,
+            .fill_confirm_latency_ms = 0.0,
+            .confirm_attempts = 0,
+        };
     }
 
     const std::string encoded_tx_info = json_escape(tx_info);
@@ -465,12 +485,27 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
         body,
         {{"Content-Type", "application/x-www-form-urlencoded"}}
     );
+    const std::uint64_t http_ack_ns = perf_now_ns();
+    const std::uint64_t http_ack_latency_ns = http_ack_ns - submit_start_ns;
+    PerfCollector::instance().record_trade_path(
+        PerfMetric::LighterSendToHttpAckNs,
+        http_ack_latency_ns
+    );
     std::cerr << "[lighter-debug] response=" << response.body << '\n';
 
     const bool tx_accepted = response.body.find("\"code\":200") != std::string::npos
                           || response.body.find("\"tx_hash\"") != std::string::npos;
     if (!tx_accepted) {
-        return LighterIocAck {.ok = false, .fill_confirmed = false, .message = response.body, .tx_hash = tx_hash, .confirmed_size = 0.0};
+        return LighterIocAck {
+            .ok = false,
+            .fill_confirmed = false,
+            .message = response.body,
+            .tx_hash = tx_hash,
+            .confirmed_size = 0.0,
+            .http_ack_latency_ms = static_cast<double>(http_ack_latency_ns) / 1000000.0,
+            .fill_confirm_latency_ms = 0.0,
+            .confirm_attempts = 0,
+        };
     }
 
     const std::regex tx_hash_pattern(R"REGEX("tx_hash":"([^"]+)")REGEX");
@@ -493,13 +528,21 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     // Poll position up to 3 times with increasing delay
     bool fill_confirmed = false;
     double confirmed_size = 0.0;
+    int confirm_attempts = 0;
+    std::uint64_t fill_confirm_latency_ns = 0;
     for (int attempt = 0; attempt < 3; ++attempt) {
+        confirm_attempts = attempt + 1;
         std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
         const double pos_after = query_position();
         const double delta = std::abs(pos_after - pos_before);
         if (delta > 0.001) {  // Position changed — fill confirmed
             fill_confirmed = true;
             confirmed_size = delta;
+            fill_confirm_latency_ns = perf_now_ns() - http_ack_ns;
+            PerfCollector::instance().record_trade_path(
+                PerfMetric::LighterHttpAckToFillConfirmNs,
+                fill_confirm_latency_ns
+            );
             std::cerr << "[lighter-debug] fill CONFIRMED: pos " << pos_before << " -> " << pos_after
                       << " delta=" << delta << " (attempt " << (attempt + 1) << ")\n";
             break;
@@ -510,6 +553,11 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     }
 
     if (!fill_confirmed) {
+        fill_confirm_latency_ns = perf_now_ns() - http_ack_ns;
+        PerfCollector::instance().record_trade_path(
+            PerfMetric::LighterHttpAckToFillConfirmNs,
+            fill_confirm_latency_ns
+        );
         std::cerr << "[lighter-debug] ⚠️ fill UNCONFIRMED after 3 attempts, tx=" << confirmed_tx_hash << "\n";
     }
 
@@ -519,6 +567,9 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
         .message = response.body,
         .tx_hash = confirmed_tx_hash,
         .confirmed_size = confirmed_size,
+        .http_ack_latency_ms = static_cast<double>(http_ack_latency_ns) / 1000000.0,
+        .fill_confirm_latency_ms = static_cast<double>(fill_confirm_latency_ns) / 1000000.0,
+        .confirm_attempts = confirm_attempts,
     };
 }
 

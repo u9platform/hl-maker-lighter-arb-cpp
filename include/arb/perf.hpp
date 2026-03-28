@@ -20,6 +20,8 @@ enum class PerfMetric : std::uint8_t {
     CancelTriggerToHlCancelSendNs,
     HlCancelSendToAckNs,
     HlFillLocalRxToLighterSendNs,
+    LighterSendToHttpAckNs,
+    LighterHttpAckToFillConfirmNs,
     LighterSendToAckNs,
     MakerFillToTakerAckTotalNs,
     HedgeFailureToUnwindSendNs,
