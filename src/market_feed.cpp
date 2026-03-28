@@ -14,53 +14,6 @@ namespace {
 // Fast ad-hoc JSON value extraction — avoids pulling in a JSON library.
 // These are hot-path so we use simple string searching instead of regex.
 
-// Parse HL l2Book WS message:
-// {"channel":"l2Book","data":{"coin":"HYPE","levels":[[{"px":"21.50","sz":"10",...},...],[{"px":"21.51",...},...]],"time":1234}}
-// We only need the top bid and top ask.
-bool parse_hl_l2book(const std::string& msg, double& bid, double& ask) {
-    // Find "levels":[[{...  — first level array is bids, second is asks.
-    const auto levels_pos = msg.find("\"levels\"");
-    if (levels_pos == std::string::npos) return false;
-
-    // Find the first "px" after levels — that's top bid.
-    const auto bid_px_pos = msg.find("\"px\"", levels_pos);
-    if (bid_px_pos == std::string::npos) return false;
-
-    auto bid_start = msg.find('"', bid_px_pos + 4);
-    if (bid_start == std::string::npos) return false;
-    ++bid_start;
-    auto bid_end = msg.find('"', bid_start);
-    if (bid_end == std::string::npos) return false;
-
-    try {
-        bid = std::stod(msg.substr(bid_start, bid_end - bid_start));
-    } catch (...) {
-        return false;
-    }
-
-    // Find the "],["  separator between bids and asks arrays.
-    const auto sep_pos = msg.find("],[", bid_px_pos);
-    if (sep_pos == std::string::npos) return false;
-
-    // First "px" after separator is top ask.
-    const auto ask_px_pos = msg.find("\"px\"", sep_pos);
-    if (ask_px_pos == std::string::npos) return false;
-
-    auto ask_start = msg.find('"', ask_px_pos + 4);
-    if (ask_start == std::string::npos) return false;
-    ++ask_start;
-    auto ask_end = msg.find('"', ask_start);
-    if (ask_end == std::string::npos) return false;
-
-    try {
-        ask = std::stod(msg.substr(ask_start, ask_end - ask_start));
-    } catch (...) {
-        return false;
-    }
-
-    return bid > 0.0 && ask > 0.0;
-}
-
 // Parse HL bbo WS message:
 // {"channel":"bbo","data":{"coin":"HYPE","time":123,"bbo":[{"px":"21.50","sz":"10","n":3},{"px":"21.51","sz":"5","n":2}]}}
 bool parse_hl_bbo(const std::string& msg, double& bid, double& ask) {
@@ -357,19 +310,14 @@ void MarketFeed::on_hl_message(const std::string& msg) {
     if (!hl_subscribed_.load(std::memory_order_relaxed)) {
         if (msg.find("subscriptionResponse") != std::string::npos) {
             hl_subscribed_.store(true, std::memory_order_release);
-            std::cerr << "[hl-ws] subscribed to l2Book:" << config_.hl_coin << '\n';
+            std::cerr << "[hl-ws] subscribed to bbo:" << config_.hl_coin << '\n';
         }
         // The subscription response may also contain initial snapshot data — fall through to parse.
     }
 
-    // Parse l2Book or bbo update.
+    // Parse bbo updates.
     double bid = 0.0, ask = 0.0;
-    bool ok = false;
-    if (msg.find("\"levels\"") != std::string::npos) {
-        ok = parse_hl_l2book(msg, bid, ask);
-    } else if (msg.find("\"bbo\"") != std::string::npos) {
-        ok = parse_hl_bbo(msg, bid, ask);
-    }
+    const bool ok = msg.find("\"bbo\"") != std::string::npos && parse_hl_bbo(msg, bid, ask);
     if (ok) {
         hl_bbo_.store(bid, ask);
         PerfCollector::instance().record_hot_path(
@@ -414,8 +362,8 @@ void MarketFeed::on_lighter_message(const std::string& msg) {
 }
 
 void MarketFeed::subscribe_hl() {
-    // Subscribe to both l2Book (full snapshot every ~0.5s) and bbo (on change, lower latency).
-    const std::string sub_book = "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"l2Book\",\"coin\":\"" +
+    // Use the lighter-weight BBO channel for HL market data.
+    const std::string sub_book = "{\"method\":\"subscribe\",\"subscription\":{\"type\":\"bbo\",\"coin\":\"" +
         config_.hl_coin + "\"}}";
     hl_ws_->send(sub_book);
 }
