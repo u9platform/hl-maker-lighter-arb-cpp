@@ -1,5 +1,6 @@
 #include "arb/engine.hpp"
 #include "arb/hl_ws_post.hpp"
+#include "arb/http.hpp"
 #include "arb/journal.hpp"
 #include "arb/lighter_ws_sendtx.hpp"
 #include "arb/market_feed.hpp"
@@ -19,11 +20,44 @@
 #include <iostream>
 #include <mutex>
 #include <queue>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <thread>
 
 namespace {
+
+// Query HL clearinghouseState for current position of a coin.
+// Returns size in base units (negative = short).
+double query_hl_position(const std::string& api_url, const std::string& address, const std::string& coin) {
+    try {
+        const std::string payload = "{\"type\":\"clearinghouseState\",\"user\":\"" + address + "\"}";
+        const auto resp = arb::http_post(api_url + "/info", payload, {{"Content-Type", "application/json"}});
+        if (resp.status_code != 200) return 0.0;
+
+        // Find the position for our coin using regex on the JSON response
+        // Pattern: "coin":"HYPE"...,"szi":"<number>"
+        // We need to find the right assetPositions entry
+        const std::string& body = resp.body;
+        
+        // Simple approach: find "coin":"HYPE" then the nearest "szi":"..." 
+        std::string coin_pattern = "\"coin\":\"" + coin + "\"";
+        auto coin_pos = body.find(coin_pattern);
+        if (coin_pos == std::string::npos) return 0.0;
+        
+        // Find "szi" after the coin match
+        auto szi_pos = body.find("\"szi\":\"", coin_pos);
+        if (szi_pos == std::string::npos) return 0.0;
+        szi_pos += 7; // skip past "szi":"
+        auto szi_end = body.find("\"", szi_pos);
+        if (szi_end == std::string::npos) return 0.0;
+        
+        return std::stod(body.substr(szi_pos, szi_end - szi_pos));
+    } catch (const std::exception& e) {
+        std::cerr << "[main] WARNING: failed to query HL position: " << e.what() << "\n";
+        return 0.0;
+    }
+}
 
 #ifndef ARB_GIT_VERSION
 #define ARB_GIT_VERSION "unknown"
@@ -223,6 +257,19 @@ int main() {
     }
 
     arb::MakerHedgeEngine engine(engine_config, hl_exchange, lighter_exchange, &journal);
+
+    // --- Sync initial HL position from API ---
+    {
+        const double init_pos = query_hl_position(
+            env_or("HL_API_URL", "https://api.hyperliquid.xyz"),
+            env_or("HL_ADDRESS", ""),
+            engine_config.hl_coin
+        );
+        if (init_pos != 0.0) {
+            engine.set_hl_position(init_pos);
+            std::cerr << "[main] synced HL position: " << init_pos << " " << engine_config.hl_coin << "\n";
+        }
+    }
 
     // --- Risk ---
     arb::RiskGuard risk({

@@ -343,6 +343,10 @@ double MakerHedgeEngine::hl_position_base() const noexcept {
     return hl_position_base_;
 }
 
+void MakerHedgeEngine::set_hl_position(double base_size) noexcept {
+    hl_position_base_ = base_size;
+}
+
 std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, const SpreadSnapshot& snapshot) {
     std::vector<EventLog> events;
 

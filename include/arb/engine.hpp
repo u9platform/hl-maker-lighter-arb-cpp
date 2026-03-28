@@ -44,6 +44,7 @@ class MakerHedgeEngine {
     [[nodiscard]] const std::optional<std::string>& active_hl_oid() const noexcept;
     [[nodiscard]] const HlMakerLighterHedger& strategy() const noexcept;
     [[nodiscard]] double hl_position_base() const noexcept;
+    void set_hl_position(double base_size) noexcept;
 
   private:
     struct OrderPerfTrace {
