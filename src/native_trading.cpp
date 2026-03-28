@@ -460,7 +460,13 @@ void NativeLighterTrading::ensure_client() {
         return;
     }
     if (signer_lib_ == nullptr) {
+#if defined(__APPLE__)
         signer_lib_ = new LighterSignerHandle("third_party/lighter_signer/lighter-signer-darwin-arm64.dylib");
+#elif defined(__linux__)
+        signer_lib_ = new LighterSignerHandle("third_party/lighter_signer/lighter-signer-linux-arm64.so");
+#else
+#error "Unsupported platform for lighter-signer"
+#endif
     }
     auto* signer = static_cast<LighterSignerHandle*>(signer_lib_);
     std::string url = config_.api_url;
