@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <queue>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -22,6 +23,18 @@ namespace {
 std::atomic<bool> g_running {true};
 std::mutex g_cv_mu;
 std::condition_variable g_cv;
+
+// Thread-safe fill event queue — WS IO thread pushes, main loop pops.
+struct FillEvent {
+    std::string coin;
+    double price;
+    double size;
+    bool is_buy;
+    std::string oid;
+};
+
+std::mutex g_fill_mu;
+std::queue<FillEvent> g_fill_queue;
 
 void signal_handler(int /*sig*/) {
     g_running.store(false, std::memory_order_release);
@@ -153,20 +166,12 @@ int main() {
 
         fill_feed->set_on_fill([&](const std::string& coin, double price, double size, bool is_buy, const std::string& oid) {
             if (coin != "HYPE") return;
-
-            std::cerr << "[fill] " << timestamp_str()
-                      << " " << coin << " px=" << price << " sz=" << size
-                      << " " << (is_buy ? "BUY" : "SELL") << " oid=" << oid << '\n';
-
-            const auto& active_oid = engine.active_hl_oid();
-            if (active_oid.has_value() && *active_oid == oid) {
-                const auto snap = feed.snapshot();
-                const auto logs = engine.on_hl_fill(price, size, snap);
-                for (const auto& log : logs) {
-                    std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
-                }
-                ++trade_count;
+            // Enqueue fill event — processed on main thread to avoid data races on engine state.
+            {
+                std::lock_guard lock(g_fill_mu);
+                g_fill_queue.push(FillEvent {coin, price, size, is_buy, oid});
             }
+            g_cv.notify_one();  // Wake main loop immediately.
         });
     }
 
@@ -200,6 +205,29 @@ int main() {
             g_cv.wait_for(lock, std::chrono::milliseconds(100));
         }
         if (!g_running.load(std::memory_order_relaxed)) break;
+
+        // --- Process queued fill events on main thread (thread-safe) ---
+        {
+            std::lock_guard lock(g_fill_mu);
+            while (!g_fill_queue.empty()) {
+                const auto fill = std::move(g_fill_queue.front());
+                g_fill_queue.pop();
+
+                std::cerr << "[fill] " << timestamp_str()
+                          << " " << fill.coin << " px=" << fill.price << " sz=" << fill.size
+                          << " " << (fill.is_buy ? "BUY" : "SELL") << " oid=" << fill.oid << '\n';
+
+                const auto& active_oid = engine.active_hl_oid();
+                if (active_oid.has_value() && *active_oid == fill.oid) {
+                    const auto fill_snap = feed.snapshot();
+                    const auto logs = engine.on_hl_fill(fill.price, fill.size, fill_snap);
+                    for (const auto& log : logs) {
+                        std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
+                    }
+                    ++trade_count;
+                }
+            }
+        }
 
         const auto snap = feed.snapshot();
         const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
