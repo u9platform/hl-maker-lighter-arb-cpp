@@ -61,6 +61,7 @@ void test_places_maker_when_spread_reaches_threshold() {
     arb::EngineConfig config;
     config.strategy.spread_bps = 2.0;
     config.strategy.cancel_band_bps = 0.5;
+    config.hl_order_interval_ms = 0;
     arb::MakerHedgeEngine engine(config, hl, lighter);
 
     const auto logs = engine.on_market_data(1000);
@@ -75,6 +76,7 @@ void test_cancels_when_spread_reverts_below_band() {
     arb::EngineConfig config;
     config.strategy.spread_bps = 2.0;
     config.strategy.cancel_band_bps = 0.5;
+    config.hl_order_interval_ms = 0;
     arb::MakerHedgeEngine engine(config, hl, lighter);
 
     const auto initial_logs = engine.on_market_data(1000);
@@ -94,6 +96,7 @@ void test_sends_lighter_hedge_after_hl_fill() {
     lighter.ioc_ack.fill_confirmed = true;
     lighter.ioc_ack.confirmed_size = 2.5;
     arb::EngineConfig config;
+    config.hl_order_interval_ms = 0;
     arb::MakerHedgeEngine engine(config, hl, lighter);
 
     const auto initial_logs = engine.on_market_data(1000);
@@ -113,6 +116,7 @@ void test_hedge_reject_triggers_hl_unwind() {
     lighter.ioc_ack.ok = false;
     lighter.ioc_ack.message = "reject";
     arb::EngineConfig config;
+    config.hl_order_interval_ms = 0;
     arb::MakerHedgeEngine engine(config, hl, lighter);
 
     const auto initial_logs = engine.on_market_data(1000);
@@ -123,6 +127,24 @@ void test_hedge_reject_triggers_hl_unwind() {
     require(!logs.empty(), "expected unwind log");
 }
 
+void test_maker_price_uses_lighter_anchor_with_hl_post_only_clamp() {
+    FakeHlExchange hl;
+    FakeLighterExchange lighter;
+    arb::EngineConfig config;
+    config.strategy.spread_bps = 2.0;
+    config.strategy.cancel_band_bps = 0.5;
+    config.strategy.pair_size_usd = 25.0;
+    config.hl_order_interval_ms = 0;
+    arb::MakerHedgeEngine engine(config, hl, lighter);
+
+    const auto logs = engine.on_market_data(1000);
+    require(!logs.empty(), "expected placement logs");
+    require(hl.place_count == 1, "expected one HL maker placement");
+    require(hl.last_limit.is_buy, "expected HL buy maker for positive spread");
+    require(hl.last_limit.price == hl.bbo.bid, "expected HL price clamped to best bid for post-only safety");
+    require(hl.last_limit.size > 0.0, "expected positive order size");
+}
+
 }  // namespace
 
 int main() {
@@ -131,6 +153,7 @@ int main() {
         test_cancels_when_spread_reverts_below_band,
         test_sends_lighter_hedge_after_hl_fill,
         test_hedge_reject_triggers_hl_unwind,
+        test_maker_price_uses_lighter_anchor_with_hl_post_only_clamp,
     };
 
     for (const auto& test : tests) {

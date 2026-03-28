@@ -20,6 +20,23 @@ double aggressive_lighter_price(const SpreadSnapshot& snapshot, Direction direct
     return lighter_mid * (1.0 + (kTakerSlippageBps / 10000.0));
 }
 
+double lighter_anchored_hl_price(const SpreadSnapshot& snapshot, Direction direction, double spread_bps) {
+    const double spread_ratio = spread_bps / 10000.0;
+    if (direction == Direction::ShortLighterLongHl) {
+        const double lighter_sell_price = snapshot.lighter.bid;
+        if (lighter_sell_price <= 0.0) {
+            return 0.0;
+        }
+        return lighter_sell_price / (1.0 + spread_ratio);
+    }
+
+    const double lighter_buy_price = snapshot.lighter.ask;
+    if (lighter_buy_price <= 0.0 || spread_ratio >= 1.0) {
+        return 0.0;
+    }
+    return lighter_buy_price / (1.0 - spread_ratio);
+}
+
 }  // namespace
 
 HlMakerLighterHedger::HlMakerLighterHedger(StrategyConfig config) : config_(config) {
@@ -53,27 +70,41 @@ Action HlMakerLighterHedger::on_market_snapshot(const SpreadSnapshot& snapshot, 
     }
 
     const double abs_spread = std::abs(snapshot.cross_spread_bps);
+    const Direction live_direction = direction_for_spread(snapshot.cross_spread_bps);
     const double threshold = effective_spread_bps(snapshot.cross_spread_bps, hl_position_base);
 
+    if (gate_.armed) {
+        const double gate_cancel = cancel_threshold_bps(gate_.entry_spread_bps);
+        if (live_direction != gate_.direction || abs_spread < gate_cancel) {
+            gate_.armed = false;
+            if (state_ == StrategyState::Idle || state_ == StrategyState::CancelledPendingConfirm) {
+                last_disarm_ms_ = now_ms;
+            }
+        }
+    } else if (abs_spread >= threshold && can_arm(now_ms)) {
+        gate_.armed = true;
+        gate_.direction = live_direction;
+        gate_.entry_spread_bps = threshold;
+    }
+
     if (state_ == StrategyState::Idle) {
-        if (abs_spread < threshold || !can_arm(now_ms)) {
+        if (!gate_.armed) {
             return {};
         }
 
-        pending_maker_ = build_maker_order(snapshot);
-        pending_maker_->entry_spread_bps = threshold;  // remember which threshold was used
+        pending_maker_ = build_maker_order(snapshot, gate_);
         state_ = StrategyState::PendingHlMaker;
 
         Action action;
         action.type = ActionType::PlaceHlMaker;
-        action.reason = (threshold < config_.spread_bps) ? "spread reached close threshold" : "spread reached entry threshold";
+        action.reason = (gate_.entry_spread_bps < config_.spread_bps) ? "spread reached close threshold" : "spread reached entry threshold";
         action.maker_order = pending_maker_;
         return action;
     }
 
     if (state_ == StrategyState::PendingHlMaker && pending_maker_.has_value()) {
         const double cancel_thresh = cancel_threshold_bps(pending_maker_->entry_spread_bps);
-        if (abs_spread < cancel_thresh) {
+        if (!gate_.armed || live_direction != pending_maker_->direction || abs_spread < cancel_thresh) {
             Action action;
             action.type = ActionType::CancelHlMaker;
             action.reason = "spread mean-reverted below cancel threshold";
@@ -88,17 +119,16 @@ Action HlMakerLighterHedger::on_market_snapshot(const SpreadSnapshot& snapshot, 
             //   a) on_hl_maker_fill() processes the fill and sends the hedge, OR
             //   b) the next on_market_snapshot() places a new maker order (overwriting it)
             state_ = StrategyState::CancelledPendingConfirm;
-            last_disarm_ms_ = now_ms;
+            disarm(now_ms);
             return action;
         }
     }
 
     // If we sent a cancel but haven't confirmed it yet, check if we should re-arm.
     if (state_ == StrategyState::CancelledPendingConfirm) {
-        if (abs_spread >= threshold && can_arm(now_ms)) {
+        if (gate_.armed && can_arm(now_ms)) {
             // Spread widened again — place a new maker order (overwrite old pending_maker_)
-            pending_maker_ = build_maker_order(snapshot);
-            pending_maker_->entry_spread_bps = threshold;
+            pending_maker_ = build_maker_order(snapshot, gate_);
             state_ = StrategyState::PendingHlMaker;
 
             Action action;
@@ -161,6 +191,7 @@ Action HlMakerLighterHedger::on_lighter_hedge_reject() {
 }
 
 void HlMakerLighterHedger::reset() {
+    gate_ = {};
     pending_maker_.reset();
     open_position_.reset();
     state_ = StrategyState::Idle;
@@ -198,27 +229,30 @@ Direction HlMakerLighterHedger::direction_for_spread(double cross_spread_bps) co
     return Direction::LongLighterShortHl;
 }
 
-PendingMakerOrder HlMakerLighterHedger::build_maker_order(const SpreadSnapshot& snapshot) const {
-    const Direction direction = direction_for_spread(snapshot.cross_spread_bps);
+PendingMakerOrder HlMakerLighterHedger::build_maker_order(const SpreadSnapshot& snapshot, const SignalGate& gate) const {
+    const Direction direction = gate.direction;
     const double avg_mid = (snapshot.lighter.mid() + snapshot.hl.mid()) / 2.0;
     const double size_base = avg_mid > 0.0 ? config_.pair_size_usd / avg_mid : 0.0;
+    const double target_price = lighter_anchored_hl_price(snapshot, direction, gate.entry_spread_bps);
 
     if (direction == Direction::ShortLighterLongHl) {
         return PendingMakerOrder {
             .direction = direction,
             .is_buy = true,
-            .price = snapshot.hl.bid,
+            .price = std::min(target_price, snapshot.hl.bid),
             .size_base = size_base,
             .trigger_spread_bps = snapshot.cross_spread_bps,
+            .entry_spread_bps = gate.entry_spread_bps,
         };
     }
 
     return PendingMakerOrder {
         .direction = direction,
         .is_buy = false,
-        .price = snapshot.hl.ask,
+        .price = std::max(target_price, snapshot.hl.ask),
         .size_base = size_base,
         .trigger_spread_bps = snapshot.cross_spread_bps,
+        .entry_spread_bps = gate.entry_spread_bps,
     };
 }
 
@@ -233,6 +267,11 @@ HedgeIntent HlMakerLighterHedger::build_lighter_hedge(const SpreadSnapshot& snap
         .limit_price = aggressive_lighter_price(snapshot, open_position_->direction),
         .size_base = open_position_->size_base,
     };
+}
+
+void HlMakerLighterHedger::disarm(std::int64_t now_ms) noexcept {
+    gate_.armed = false;
+    last_disarm_ms_ = now_ms;
 }
 
 }  // namespace arb
