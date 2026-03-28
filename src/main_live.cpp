@@ -262,7 +262,7 @@ int main() {
     {
         const double init_pos = query_hl_position(
             env_or("HL_API_URL", "https://api.hyperliquid.xyz"),
-            env_or("HL_ADDRESS", ""),
+            env_or("HL_USER_ADDRESS", ""),
             engine_config.hl_coin
         );
         if (init_pos != 0.0) {
