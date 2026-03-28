@@ -21,7 +21,8 @@ class HlWsPostTransport {
         int timeout_ms {5000};
     };
 
-    explicit HlWsPostTransport(Config config = {});
+    HlWsPostTransport() : HlWsPostTransport(Config{}) {}
+    explicit HlWsPostTransport(Config config);
     ~HlWsPostTransport();
 
     HlWsPostTransport(const HlWsPostTransport&) = delete;
