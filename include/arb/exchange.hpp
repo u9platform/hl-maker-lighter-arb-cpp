@@ -46,8 +46,10 @@ struct LighterIocRequest {
 
 struct LighterIocAck {
     bool ok {false};
+    bool fill_confirmed {false};  // True only if position change verified
     std::string message;
     std::string tx_hash;
+    double confirmed_size {0.0};  // Actual size filled (from position delta)
 };
 
 struct FillEvent {

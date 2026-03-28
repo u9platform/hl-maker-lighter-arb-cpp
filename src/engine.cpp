@@ -79,19 +79,44 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
 
     std::vector<EventLog> events;
     std::ostringstream msg;
-    if (ack.ok) {
+    if (ack.ok && ack.fill_confirmed) {
         msg << "TRADE COMPLETE: hl_px=" << fill_price << " sz=" << fill_size_base
+            << " lt_confirmed_sz=" << ack.confirmed_size
             << " lt_hedge tx=" << ack.tx_hash
             << " spread=" << snapshot.cross_spread_bps;
+        // Track HL position: buy adds, sell subtracts
+        const bool hl_is_buy = (dir == Direction::ShortLighterLongHl);
+        hl_position_base_ += hl_is_buy ? fill_size_base : -fill_size_base;
+    } else if (ack.ok && !ack.fill_confirmed) {
+        msg << "HEDGE UNCONFIRMED: hl_px=" << fill_price << " sz=" << fill_size_base
+            << " lt_tx=" << ack.tx_hash << " — UNWINDING HL POSITION";
+        events.push_back(EventLog {.message = msg.str()});
+        // Lighter fill not confirmed — unwind the HL side to avoid naked position
+        const bool unwind_buy = !is_ask;  // Reverse the HL fill direction
+        const HlReduceAck unwind = hl_.reduce_position(config_.hl_coin, unwind_buy, fill_size_base, config_.dry_run);
+        std::ostringstream unwind_msg;
+        unwind_msg << (unwind.ok ? "HL UNWIND OK" : "HL UNWIND FAILED")
+                   << " sz=" << unwind.filled_size << " avg_px=" << unwind.avg_fill_price;
+        events.push_back(EventLog {.message = unwind_msg.str()});
+        strategy_.reset();
+        active_hl_oid_.reset();
+        return events;
     } else {
         msg << "HEDGE FAILED for hl fill px=" << fill_price << " sz=" << fill_size_base
-            << " err=" << ack.message;
+            << " err=" << ack.message << " — UNWINDING HL POSITION";
+        events.push_back(EventLog {.message = msg.str()});
+        // Hedge failed — unwind HL
+        const bool unwind_buy = !is_ask;
+        const HlReduceAck unwind = hl_.reduce_position(config_.hl_coin, unwind_buy, fill_size_base, config_.dry_run);
+        std::ostringstream unwind_msg;
+        unwind_msg << (unwind.ok ? "HL UNWIND OK" : "HL UNWIND FAILED")
+                   << " sz=" << unwind.filled_size << " avg_px=" << unwind.avg_fill_price;
+        events.push_back(EventLog {.message = unwind_msg.str()});
+        strategy_.reset();
+        active_hl_oid_.reset();
+        return events;
     }
     events.push_back(EventLog {.message = msg.str()});
-
-    // Track HL position: buy adds, sell subtracts
-    const bool hl_is_buy = (dir == Direction::ShortLighterLongHl);  // HL buys when shorting Lighter
-    hl_position_base_ += hl_is_buy ? fill_size_base : -fill_size_base;
 
     // Reset strategy to Idle so it can immediately start looking for next trade
     strategy_.reset();
@@ -171,25 +196,22 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
                 .dry_run = config_.dry_run,
             });
             std::ostringstream msg;
-            if (ack.ok) {
-                // Lighter IOC: sendTx success with code=200 means order is accepted and
-                // executed on-chain. Treat as filled at our limit price (worst case).
+            if (ack.ok && ack.fill_confirmed) {
                 strategy_.on_lighter_hedge_fill(action.hedge_intent->limit_price);
                 const auto& pos = strategy_.open_position();
-                msg << "TRADE COMPLETE: lighter hedge FILLED tx=" << ack.tx_hash
+                msg << "TRADE COMPLETE: lighter hedge CONFIRMED tx=" << ack.tx_hash
+                    << " confirmed_sz=" << ack.confirmed_size
                     << " hl_px=" << (pos ? pos->hl_fill_price : 0.0)
                     << " lt_px=" << (pos ? pos->lighter_fill_price : 0.0)
                     << " spread=" << snapshot.cross_spread_bps;
-                // Position is hedged on both sides. Reset to Idle for next trade.
-                // The PnL is locked in the spread between HL and Lighter fills.
                 strategy_.reset();
             } else {
-                // Hedge failed — trigger HL unwind
+                // Hedge failed or unconfirmed — trigger HL unwind
                 const auto reject_logs = execute_action(strategy_.on_lighter_hedge_reject(), snapshot);
                 for (const auto& rl : reject_logs) {
                     events.push_back(rl);
                 }
-                msg << "lighter hedge FAILED: " << ack.message
+                msg << "lighter hedge " << (ack.ok ? "UNCONFIRMED" : "FAILED") << ": " << ack.message
                     << " spread=" << snapshot.cross_spread_bps;
             }
             events.push_back(EventLog {.message = msg.str()});

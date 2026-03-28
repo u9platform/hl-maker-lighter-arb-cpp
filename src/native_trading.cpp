@@ -16,6 +16,7 @@
 #include <regex>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 namespace arb {
 
@@ -419,9 +420,12 @@ Bbo NativeLighterTrading::get_bbo(std::int64_t market_id) {
 
 LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& request) {
     if (request.dry_run) {
-        return LighterIocAck {.ok = true, .message = "dry-run", .tx_hash = "dry_tx"};
+        return LighterIocAck {.ok = true, .fill_confirmed = true, .message = "dry-run", .tx_hash = "dry_tx", .confirmed_size = request.size};
     }
     ensure_client();
+
+    // Snapshot position BEFORE sending order
+    const double pos_before = query_position();
 
     const auto next_nonce_value = next_nonce();
     const auto* signer = static_cast<LighterSignerHandle*>(signer_lib_);
@@ -449,7 +453,7 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     const std::string tx_hash = decode_and_free(result.txHash, signer->free_fn());
     decode_and_free(result.messageToSign, signer->free_fn());
     if (!err.empty()) {
-        return LighterIocAck {.ok = false, .message = err, .tx_hash = ""};
+        return LighterIocAck {.ok = false, .fill_confirmed = false, .message = err, .tx_hash = "", .confirmed_size = 0.0};
     }
 
     const std::string encoded_tx_info = json_escape(tx_info);
@@ -463,15 +467,92 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     );
     std::cerr << "[lighter-debug] response=" << response.body << '\n';
 
-    if (response.body.find("\"code\":200") != std::string::npos || response.body.find("\"tx_hash\"") != std::string::npos) {
-        const std::regex tx_hash_pattern(R"REGEX("tx_hash":"([^"]+)")REGEX");
-        return LighterIocAck {
-            .ok = true,
-            .message = response.body,
-            .tx_hash = response.body.find("tx_hash") != std::string::npos ? first_match_as_string(response.body, tx_hash_pattern) : tx_hash,
-        };
+    const bool tx_accepted = response.body.find("\"code\":200") != std::string::npos
+                          || response.body.find("\"tx_hash\"") != std::string::npos;
+    if (!tx_accepted) {
+        return LighterIocAck {.ok = false, .fill_confirmed = false, .message = response.body, .tx_hash = tx_hash, .confirmed_size = 0.0};
     }
-    return LighterIocAck {.ok = false, .message = response.body, .tx_hash = tx_hash};
+
+    const std::regex tx_hash_pattern(R"REGEX("tx_hash":"([^"]+)")REGEX");
+    const std::string confirmed_tx_hash = response.body.find("tx_hash") != std::string::npos
+        ? first_match_as_string(response.body, tx_hash_pattern)
+        : tx_hash;
+
+    // Wait for predicted execution time, then verify position changed
+    const std::regex exec_time_pattern(R"REGEX("predicted_execution_time_ms":([0-9]+))REGEX");
+    std::uint64_t wait_ms = 500;  // Default wait
+    std::smatch exec_match;
+    if (std::regex_search(response.body, exec_match, exec_time_pattern)) {
+        const std::uint64_t predicted = std::stoull(exec_match[1].str());
+        const std::uint64_t now = current_timestamp_ms();
+        if (predicted > now) {
+            wait_ms = predicted - now + 200;  // predicted + 200ms buffer
+        }
+    }
+
+    // Poll position up to 3 times with increasing delay
+    bool fill_confirmed = false;
+    double confirmed_size = 0.0;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
+        const double pos_after = query_position();
+        const double delta = std::abs(pos_after - pos_before);
+        if (delta > 0.001) {  // Position changed — fill confirmed
+            fill_confirmed = true;
+            confirmed_size = delta;
+            std::cerr << "[lighter-debug] fill CONFIRMED: pos " << pos_before << " -> " << pos_after
+                      << " delta=" << delta << " (attempt " << (attempt + 1) << ")\n";
+            break;
+        }
+        std::cerr << "[lighter-debug] fill NOT confirmed yet, pos=" << pos_after
+                  << " (attempt " << (attempt + 1) << ", waiting " << wait_ms << "ms more)\n";
+        wait_ms = std::min(wait_ms * 2, static_cast<std::uint64_t>(2000));
+    }
+
+    if (!fill_confirmed) {
+        std::cerr << "[lighter-debug] ⚠️ fill UNCONFIRMED after 3 attempts, tx=" << confirmed_tx_hash << "\n";
+    }
+
+    return LighterIocAck {
+        .ok = tx_accepted,
+        .fill_confirmed = fill_confirmed,
+        .message = response.body,
+        .tx_hash = confirmed_tx_hash,
+        .confirmed_size = confirmed_size,
+    };
+}
+
+double NativeLighterTrading::query_position() const {
+    const HttpResponse response = http_get(
+        config_.api_url + "/api/v1/account?by=index&value=" + std::to_string(config_.account_index)
+    );
+    // Parse position for our market from the account response
+    // Look for: "market_id":24 ... "sign":-1 ... "position":"0.85"
+    const std::string& body = response.body;
+
+    // Find the positions array section for our market
+    const std::string market_key = "\"market_id\":" + std::to_string(config_.market_index);
+    const auto market_pos = body.find(market_key);
+    if (market_pos == std::string::npos) {
+        return 0.0;  // No position in this market
+    }
+
+    // Extract sign and position from the same object
+    // Search within a reasonable window after market_id
+    const std::string section = body.substr(market_pos, 500);
+    const std::regex sign_pattern(R"REGEX("sign":(-?[0-9]+))REGEX");
+    const std::regex pos_pattern(R"REGEX("position":"([^"]+)")REGEX");
+
+    std::smatch sign_match, pos_match;
+    int sign = 0;
+    double position = 0.0;
+    if (std::regex_search(section, sign_match, sign_pattern)) {
+        sign = std::stoi(sign_match[1].str());
+    }
+    if (std::regex_search(section, pos_match, pos_pattern)) {
+        position = std::stod(pos_match[1].str());
+    }
+    return sign * position;  // Negative for short, positive for long
 }
 
 void NativeLighterTrading::ensure_client() {

@@ -71,6 +71,7 @@ class NativeLighterTrading final : public LighterExchange {
     [[nodiscard]] std::int64_t scaled_size(double size) const;
     [[nodiscard]] std::uint32_t scaled_price(double price) const;
     [[nodiscard]] static std::string json_escape(const std::string& value);
+    [[nodiscard]] double query_position() const;
 
     LighterConfig config_;
     void* signer_lib_ {nullptr};
