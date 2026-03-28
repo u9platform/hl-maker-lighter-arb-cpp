@@ -52,11 +52,21 @@ std::vector<EventLog> MakerHedgeEngine::on_market_data(std::int64_t now_ms) {
         static_cast<std::uint64_t>(std::llabs(snapshot.hl.quote_age_ms - snapshot.lighter.quote_age_ms))
     );
     
-    // Position limit: if we're at max, don't open new positions.
-    // Force strategy to Idle so it doesn't place new maker orders.
+    // Position limit: if at max, only allow orders that REDUCE the position.
+    // pos > 0 (long HL) → only allow sell (ShortLighterLongHl has is_buy=true on HL, WRONG)
+    // Actually: check which direction would increase vs decrease position.
+    // hl_position_base_ > 0 → long on HL → reduce = sell on HL → LongLighterShortHl
+    // hl_position_base_ < 0 → short on HL → reduce = buy on HL → ShortLighterLongHl
     if (position_limit_reached(snapshot.hl.mid()) &&
         strategy_.state() == StrategyState::Idle) {
-        return {};  // Skip — at position limit
+        // Determine which direction the spread would trigger
+        const bool would_buy_hl = (snapshot.cross_spread_bps >= 0.0);  // ShortLighterLongHl = buy on HL
+        const bool would_increase_pos = (hl_position_base_ >= 0.0 && would_buy_hl)
+                                     || (hl_position_base_ < 0.0 && !would_buy_hl);
+        if (would_increase_pos) {
+            return {};  // Skip — would increase position beyond limit
+        }
+        // Allow through — this direction reduces position
     }
     
     const std::uint64_t decision_start_ns = perf_now_ns();
