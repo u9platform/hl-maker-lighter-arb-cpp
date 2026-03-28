@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstring>
 #include <iomanip>
+#include <iostream>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -451,12 +452,16 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
         return LighterIocAck {.ok = false, .message = err, .tx_hash = ""};
     }
 
-    const std::string body = "tx_type=" + std::to_string(result.txType) + "&tx_info=" + json_escape(tx_info);
+    const std::string encoded_tx_info = json_escape(tx_info);
+    const std::string body = "tx_type=" + std::to_string(result.txType) + "&tx_info=" + encoded_tx_info;
+    std::cerr << "[lighter-debug] tx_type=" << static_cast<int>(result.txType)
+              << " tx_info_raw=" << tx_info.substr(0, 200) << '\n';
     const HttpResponse response = http_post(
         config_.api_url + "/api/v1/sendTx",
         body,
         {{"Content-Type", "application/x-www-form-urlencoded"}}
     );
+    std::cerr << "[lighter-debug] response=" << response.body << '\n';
 
     if (response.body.find("\"code\":200") != std::string::npos || response.body.find("\"tx_hash\"") != std::string::npos) {
         const std::regex tx_hash_pattern(R"REGEX("tx_hash":"([^"]+)")REGEX");

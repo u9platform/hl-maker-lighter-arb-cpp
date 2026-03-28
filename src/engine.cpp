@@ -118,9 +118,27 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
                 .dry_run = config_.dry_run,
             });
             std::ostringstream msg;
-            msg << (ack.ok ? "sent lighter hedge tx=" : "lighter hedge failed: ")
-                << (ack.ok ? ack.tx_hash : ack.message)
-                << " spread=" << snapshot.cross_spread_bps;
+            if (ack.ok) {
+                // Lighter IOC: sendTx success with code=200 means order is accepted and
+                // executed on-chain. Treat as filled at our limit price (worst case).
+                strategy_.on_lighter_hedge_fill(action.hedge_intent->limit_price);
+                const auto& pos = strategy_.open_position();
+                msg << "TRADE COMPLETE: lighter hedge FILLED tx=" << ack.tx_hash
+                    << " hl_px=" << (pos ? pos->hl_fill_price : 0.0)
+                    << " lt_px=" << (pos ? pos->lighter_fill_price : 0.0)
+                    << " spread=" << snapshot.cross_spread_bps;
+                // Position is hedged on both sides. Reset to Idle for next trade.
+                // The PnL is locked in the spread between HL and Lighter fills.
+                strategy_.reset();
+            } else {
+                // Hedge failed — trigger HL unwind
+                const auto reject_logs = execute_action(strategy_.on_lighter_hedge_reject(), snapshot);
+                for (const auto& rl : reject_logs) {
+                    events.push_back(rl);
+                }
+                msg << "lighter hedge FAILED: " << ack.message
+                    << " spread=" << snapshot.cross_spread_bps;
+            }
             events.push_back(EventLog {.message = msg.str()});
             return events;
         }
