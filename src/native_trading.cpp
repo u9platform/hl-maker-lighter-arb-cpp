@@ -88,6 +88,7 @@ std::string url_encode(const std::string& value) {
 using CreateClientFn = char* (*)(char*, char*, int, int, long long);
 using CreateAuthTokenFn = struct StrOrErr (*)(long long, int, long long);
 using SignCreateOrderFn = struct SignedTxResponse (*)(int, long long, long long, int, int, int, int, int, int, long long, long long, int, int, long long, int, long long);
+using SignCancelOrderFn = struct SignedTxResponse (*)(int, long long, long long, int, long long);
 using FreeFn = void (*)(void*);
 
 struct StrOrErr {
@@ -113,6 +114,7 @@ class LighterSignerHandle {
         create_client_ = load<CreateClientFn>("CreateClient");
         create_auth_token_ = load<CreateAuthTokenFn>("CreateAuthToken");
         sign_create_order_ = load<SignCreateOrderFn>("SignCreateOrder");
+        sign_cancel_order_ = load<SignCancelOrderFn>("SignCancelOrder");
         free_ = load<FreeFn>("Free");
     }
 
@@ -134,6 +136,7 @@ class LighterSignerHandle {
     CreateClientFn create_client() const { return create_client_; }
     CreateAuthTokenFn create_auth_token() const { return create_auth_token_; }
     SignCreateOrderFn sign_create_order() const { return sign_create_order_; }
+    SignCancelOrderFn sign_cancel_order() const { return sign_cancel_order_; }
     FreeFn free_fn() const { return free_; }
 
   private:
@@ -141,6 +144,7 @@ class LighterSignerHandle {
     CreateClientFn create_client_ {nullptr};
     CreateAuthTokenFn create_auth_token_ {nullptr};
     SignCreateOrderFn sign_create_order_ {nullptr};
+    SignCancelOrderFn sign_cancel_order_ {nullptr};
     FreeFn free_ {nullptr};
 };
 
@@ -202,6 +206,44 @@ HlLimitOrderAck NativeHyperliquidTrading::place_limit_order(const HlLimitOrderRe
         .ok = false,
         .message = body,
         .oid = "",
+        .sign_latency_ms = result.sign_latency_ms,
+        .ws_send_call_latency_ms = result.ws_send_call_latency_ms,
+        .ws_send_to_response_rx_latency_ms = result.ws_send_to_response_rx_latency_ms,
+        .response_rx_to_unblock_latency_ms = result.response_rx_to_unblock_latency_ms,
+    };
+}
+
+HlIocOrderAck NativeHyperliquidTrading::place_ioc_order(const HlIocOrderRequest& request) {
+    if (request.dry_run) {
+        return HlIocOrderAck {
+            .ok = true,
+            .message = "dry-run",
+            .filled_size = request.size,
+            .avg_fill_price = request.price,
+        };
+    }
+
+    HlLimitOrderRequest limit_request {
+        .coin = request.coin,
+        .is_buy = request.is_buy,
+        .price = request.price,
+        .size = request.size,
+        .post_only = false,
+        .dry_run = false,
+    };
+    const auto& meta = meta_for_coin(request.coin);
+    const std::uint64_t nonce = current_timestamp_ms();
+    const std::string action_json = order_action_json(limit_request, meta, true, false);
+    const Bytes32 hash = order_action_hash(limit_request, meta, true, false, nonce);
+    const HlActionResult result = post_exchange_action(action_json, hash, nonce);
+    const std::string& body = result.body;
+    const std::regex filled_size_pattern(R"REGEX("totalSz":"([^"]+)")REGEX");
+    const std::regex avg_px_pattern(R"REGEX("avgPx":"([^"]+)")REGEX");
+    return HlIocOrderAck {
+        .ok = body.find("\"status\":\"ok\"") != std::string::npos,
+        .message = body,
+        .filled_size = body.find("totalSz") != std::string::npos ? first_match_as_double(body, filled_size_pattern) : 0.0,
+        .avg_fill_price = body.find("avgPx") != std::string::npos ? first_match_as_double(body, avg_px_pattern) : 0.0,
         .sign_latency_ms = result.sign_latency_ms,
         .ws_send_call_latency_ms = result.ws_send_call_latency_ms,
         .ws_send_to_response_rx_latency_ms = result.ws_send_to_response_rx_latency_ms,
@@ -491,6 +533,144 @@ Bbo NativeLighterTrading::get_bbo(std::int64_t market_id) {
     };
 }
 
+bool NativeLighterTrading::tx_response_ok(const std::string& response_body) {
+    return response_body.find("\"code\":200") != std::string::npos
+        || response_body.find("\"tx_hash\"") != std::string::npos;
+}
+
+std::string NativeLighterTrading::send_signed_tx(std::uint8_t tx_type, const std::string& tx_info) const {
+    if (tx_transport_) {
+        return tx_transport_(tx_type, tx_info);
+    }
+    const std::string body = "tx_type=" + std::to_string(tx_type) + "&tx_info=" + url_encode(tx_info);
+    const HttpResponse response = http_post(
+        config_.api_url + "/api/v1/sendTx",
+        body,
+        {{"Content-Type", "application/x-www-form-urlencoded"}}
+    );
+    return response.body;
+}
+
+LighterLimitOrderAck NativeLighterTrading::place_limit_order(const LighterLimitOrderRequest& request) {
+    if (request.dry_run) {
+        return LighterLimitOrderAck {
+            .ok = true,
+            .message = "dry-run",
+            .tx_hash = "dry_tx",
+            .client_order_index = static_cast<std::int64_t>(current_timestamp_ms()),
+        };
+    }
+    ensure_client();
+
+    const std::uint64_t submit_start_ns = perf_now_ns();
+    const auto next_nonce_value = next_nonce();
+    const std::uint64_t nonce_done_ns = perf_now_ns();
+    const auto* signer = static_cast<LighterSignerHandle*>(signer_lib_);
+    const std::int64_t client_order_index = static_cast<std::int64_t>(current_timestamp_ms());
+    const auto result = signer->sign_create_order()(
+        static_cast<int>(config_.market_index),
+        static_cast<long long>(client_order_index),
+        static_cast<long long>(scaled_size(request.size)),
+        static_cast<int>(scaled_price(request.price)),
+        request.is_ask ? 1 : 0,
+        0,
+        request.post_only ? 2 : 1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        static_cast<long long>(next_nonce_value),
+        config_.api_key_index,
+        config_.account_index
+    );
+
+    const std::string err = decode_and_free(result.err, signer->free_fn());
+    const std::string tx_info = decode_and_free(result.txInfo, signer->free_fn());
+    const std::string tx_hash = decode_and_free(result.txHash, signer->free_fn());
+    decode_and_free(result.messageToSign, signer->free_fn());
+    const std::uint64_t sign_done_ns = perf_now_ns();
+    if (!err.empty()) {
+        return LighterLimitOrderAck {
+            .ok = false,
+            .message = err,
+            .tx_hash = "",
+            .client_order_index = client_order_index,
+            .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
+            .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
+        };
+    }
+
+    const std::uint64_t send_start_ns = perf_now_ns();
+    const std::string response_body = send_signed_tx(result.txType, tx_info);
+    const std::uint64_t ack_ns = perf_now_ns();
+    return LighterLimitOrderAck {
+        .ok = tx_response_ok(response_body),
+        .message = response_body,
+        .tx_hash = tx_hash,
+        .client_order_index = client_order_index,
+        .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
+        .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
+        .send_tx_ack_latency_ms = static_cast<double>(ack_ns - send_start_ns) / 1000000.0,
+        .place_to_http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+        .http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+    };
+}
+
+LighterCancelAck NativeLighterTrading::cancel_order(std::int64_t order_index, bool dry_run) {
+    if (dry_run) {
+        return LighterCancelAck {
+            .ok = true,
+            .message = "dry-run",
+            .tx_hash = "dry_tx",
+            .order_index = order_index,
+        };
+    }
+    ensure_client();
+
+    const std::uint64_t submit_start_ns = perf_now_ns();
+    const auto next_nonce_value = next_nonce();
+    const std::uint64_t nonce_done_ns = perf_now_ns();
+    const auto* signer = static_cast<LighterSignerHandle*>(signer_lib_);
+    const auto result = signer->sign_cancel_order()(
+        static_cast<int>(config_.market_index),
+        static_cast<long long>(order_index),
+        static_cast<long long>(next_nonce_value),
+        config_.api_key_index,
+        config_.account_index
+    );
+    const std::string err = decode_and_free(result.err, signer->free_fn());
+    const std::string tx_info = decode_and_free(result.txInfo, signer->free_fn());
+    const std::string tx_hash = decode_and_free(result.txHash, signer->free_fn());
+    decode_and_free(result.messageToSign, signer->free_fn());
+    const std::uint64_t sign_done_ns = perf_now_ns();
+    if (!err.empty()) {
+        return LighterCancelAck {
+            .ok = false,
+            .message = err,
+            .tx_hash = "",
+            .order_index = order_index,
+            .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
+            .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
+        };
+    }
+
+    const std::uint64_t send_start_ns = perf_now_ns();
+    const std::string response_body = send_signed_tx(result.txType, tx_info);
+    const std::uint64_t ack_ns = perf_now_ns();
+    return LighterCancelAck {
+        .ok = tx_response_ok(response_body),
+        .message = response_body,
+        .tx_hash = tx_hash,
+        .order_index = order_index,
+        .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
+        .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
+        .send_tx_ack_latency_ms = static_cast<double>(ack_ns - send_start_ns) / 1000000.0,
+        .cancel_to_http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+    };
+}
+
 LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& request) {
     if (request.dry_run) {
         return LighterIocAck {
@@ -575,18 +755,7 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
               << " tx_info_raw=" << tx_info.substr(0, 200) << '\n';
 
     const std::uint64_t send_start_ns = perf_now_ns();
-    std::string response_body;
-    if (tx_transport_) {
-        response_body = tx_transport_(result.txType, tx_info);
-    } else {
-        const std::string body = "tx_type=" + std::to_string(result.txType) + "&tx_info=" + url_encode(tx_info);
-        const HttpResponse response = http_post(
-            config_.api_url + "/api/v1/sendTx",
-            body,
-            {{"Content-Type", "application/x-www-form-urlencoded"}}
-        );
-        response_body = response.body;
-    }
+    const std::string response_body = send_signed_tx(result.txType, tx_info);
     const std::uint64_t http_ack_ns = perf_now_ns();
     const std::uint64_t send_tx_ack_latency_ns = http_ack_ns - send_start_ns;
     const std::uint64_t http_ack_latency_ns = http_ack_ns - submit_start_ns;
@@ -600,8 +769,7 @@ LighterIocAck NativeLighterTrading::place_ioc_order(const LighterIocRequest& req
     );
     std::cerr << "[lighter-debug] response=" << response_body << '\n';
 
-    const bool tx_accepted = response_body.find("\"code\":200") != std::string::npos
-                          || response_body.find("\"tx_hash\"") != std::string::npos;
+    const bool tx_accepted = tx_response_ok(response_body);
     if (!tx_accepted) {
         return LighterIocAck {
             .ok = false,

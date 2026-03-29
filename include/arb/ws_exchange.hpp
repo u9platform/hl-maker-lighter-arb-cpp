@@ -20,6 +20,10 @@ class WsHyperliquidExchange final : public HyperliquidExchange {
         return trading_.place_limit_order(request);
     }
 
+    HlIocOrderAck place_ioc_order(const HlIocOrderRequest& request) override {
+        return trading_.place_ioc_order(request);
+    }
+
     HlCancelAck cancel_order(const std::string& coin, const std::string& oid, bool dry_run) override {
         return trading_.cancel_order(coin, oid, dry_run);
     }
@@ -41,6 +45,14 @@ class WsLighterExchange final : public LighterExchange {
 
     Bbo get_bbo(std::int64_t /*market_id*/) override {
         return bbo_.load();
+    }
+
+    LighterLimitOrderAck place_limit_order(const LighterLimitOrderRequest& request) override {
+        return trading_.place_limit_order(request);
+    }
+
+    LighterCancelAck cancel_order(std::int64_t order_index, bool dry_run) override {
+        return trading_.cancel_order(order_index, dry_run);
     }
 
     LighterIocAck place_ioc_order(const LighterIocRequest& request) override {

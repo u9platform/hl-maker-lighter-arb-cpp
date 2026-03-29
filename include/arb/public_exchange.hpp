@@ -12,6 +12,7 @@ class NativeHyperliquidExchange final : public HyperliquidExchange {
 
     [[nodiscard]] Bbo get_bbo(const std::string& coin) override;
     [[nodiscard]] HlLimitOrderAck place_limit_order(const HlLimitOrderRequest& request) override;
+    [[nodiscard]] HlIocOrderAck place_ioc_order(const HlIocOrderRequest& request) override;
     [[nodiscard]] HlCancelAck cancel_order(const std::string& coin, const std::string& oid, bool dry_run) override;
     [[nodiscard]] HlReduceAck reduce_position(const std::string& coin, bool is_buy, double size, bool dry_run) override;
 
@@ -24,6 +25,8 @@ class NativeLighterExchange final : public LighterExchange {
     explicit NativeLighterExchange(std::string api_url = "https://mainnet.zklighter.elliot.ai");
 
     [[nodiscard]] Bbo get_bbo(std::int64_t market_id) override;
+    [[nodiscard]] LighterLimitOrderAck place_limit_order(const LighterLimitOrderRequest& request) override;
+    [[nodiscard]] LighterCancelAck cancel_order(std::int64_t order_index, bool dry_run) override;
     [[nodiscard]] LighterIocAck place_ioc_order(const LighterIocRequest& request) override;
 
   private:

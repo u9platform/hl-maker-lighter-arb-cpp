@@ -38,6 +38,7 @@ class NativeHyperliquidTrading final : public HyperliquidExchange {
 
     [[nodiscard]] Bbo get_bbo(const std::string& coin) override;
     [[nodiscard]] HlLimitOrderAck place_limit_order(const HlLimitOrderRequest& request) override;
+    [[nodiscard]] HlIocOrderAck place_ioc_order(const HlIocOrderRequest& request) override;
     [[nodiscard]] HlCancelAck cancel_order(const std::string& coin, const std::string& oid, bool dry_run) override;
     [[nodiscard]] HlReduceAck reduce_position(const std::string& coin, bool is_buy, double size, bool dry_run) override;
 
@@ -85,6 +86,8 @@ class NativeLighterTrading final : public LighterExchange {
     [[nodiscard]] std::string create_auth_token(std::int64_t deadline_ms);
 
     [[nodiscard]] Bbo get_bbo(std::int64_t market_id) override;
+    [[nodiscard]] LighterLimitOrderAck place_limit_order(const LighterLimitOrderRequest& request) override;
+    [[nodiscard]] LighterCancelAck cancel_order(std::int64_t order_index, bool dry_run) override;
     [[nodiscard]] LighterIocAck place_ioc_order(const LighterIocRequest& request) override;
 
   private:
@@ -95,6 +98,8 @@ class NativeLighterTrading final : public LighterExchange {
     [[nodiscard]] std::int64_t scaled_size(double size) const;
     [[nodiscard]] std::uint32_t scaled_price(double price) const;
     [[nodiscard]] static std::string json_escape(const std::string& value);
+    [[nodiscard]] static bool tx_response_ok(const std::string& response_body);
+    [[nodiscard]] std::string send_signed_tx(std::uint8_t tx_type, const std::string& tx_info) const;
     [[nodiscard]] LighterPositionSnapshot query_position_snapshot() const;
     [[nodiscard]] double query_position() const;
 

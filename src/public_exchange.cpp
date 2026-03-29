@@ -44,6 +44,10 @@ HlLimitOrderAck NativeHyperliquidExchange::place_limit_order(const HlLimitOrderR
     throw std::runtime_error("NativeHyperliquidExchange trading is not implemented yet");
 }
 
+HlIocOrderAck NativeHyperliquidExchange::place_ioc_order(const HlIocOrderRequest&) {
+    throw std::runtime_error("NativeHyperliquidExchange IOC trading is not implemented yet");
+}
+
 HlCancelAck NativeHyperliquidExchange::cancel_order(const std::string&, const std::string&, bool) {
     throw std::runtime_error("NativeHyperliquidExchange cancel is not implemented yet");
 }
@@ -73,6 +77,14 @@ Bbo NativeLighterExchange::get_bbo(std::int64_t market_id) {
 
 LighterIocAck NativeLighterExchange::place_ioc_order(const LighterIocRequest&) {
     throw std::runtime_error("NativeLighterExchange trading is not implemented yet");
+}
+
+LighterLimitOrderAck NativeLighterExchange::place_limit_order(const LighterLimitOrderRequest&) {
+    throw std::runtime_error("NativeLighterExchange limit trading is not implemented yet");
+}
+
+LighterCancelAck NativeLighterExchange::cancel_order(std::int64_t, bool) {
+    throw std::runtime_error("NativeLighterExchange cancel is not implemented yet");
 }
 
 }  // namespace arb

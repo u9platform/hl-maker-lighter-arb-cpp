@@ -12,18 +12,26 @@ namespace {
 struct FakeHlExchange final : arb::HyperliquidExchange {
     arb::Bbo bbo {.bid = 10.0, .ask = 10.01, .quote_age_ms = 1};
     arb::HlLimitOrderAck limit_ack {.ok = true, .message = "", .oid = "oid-1"};
+    arb::HlIocOrderAck ioc_ack {.ok = true, .message = "", .filled_size = 2.5, .avg_fill_price = 10.02};
     arb::HlCancelAck cancel_ack {.ok = true, .message = "", .oid = "oid-1"};
     arb::HlReduceAck reduce_ack {.ok = true, .message = "", .filled_size = 2.5, .avg_fill_price = 10.0};
     int place_count {0};
+    int ioc_count {0};
     int cancel_count {0};
     int reduce_count {0};
     arb::HlLimitOrderRequest last_limit {};
+    arb::HlIocOrderRequest last_ioc {};
 
     arb::Bbo get_bbo(const std::string&) override { return bbo; }
     arb::HlLimitOrderAck place_limit_order(const arb::HlLimitOrderRequest& request) override {
         ++place_count;
         last_limit = request;
         return limit_ack;
+    }
+    arb::HlIocOrderAck place_ioc_order(const arb::HlIocOrderRequest& request) override {
+        ++ioc_count;
+        last_ioc = request;
+        return ioc_ack;
     }
     arb::HlCancelAck cancel_order(const std::string&, const std::string&, bool) override {
         ++cancel_count;
@@ -37,11 +45,25 @@ struct FakeHlExchange final : arb::HyperliquidExchange {
 
 struct FakeLighterExchange final : arb::LighterExchange {
     arb::Bbo bbo {.bid = 10.03, .ask = 10.05, .quote_age_ms = 1};
+    arb::LighterLimitOrderAck limit_ack {.ok = true, .message = "", .tx_hash = "ltx-1", .client_order_index = 1001};
+    arb::LighterCancelAck cancel_ack {.ok = true, .message = "", .tx_hash = "ctx-1", .order_index = 1001};
     arb::LighterIocAck ioc_ack {.ok = true, .message = "", .tx_hash = "tx-1"};
+    int limit_count {0};
+    int cancel_count {0};
     int ioc_count {0};
+    arb::LighterLimitOrderRequest last_limit {};
     arb::LighterIocRequest last_ioc {};
 
     arb::Bbo get_bbo(std::int64_t) override { return bbo; }
+    arb::LighterLimitOrderAck place_limit_order(const arb::LighterLimitOrderRequest& request) override {
+        ++limit_count;
+        last_limit = request;
+        return limit_ack;
+    }
+    arb::LighterCancelAck cancel_order(std::int64_t, bool) override {
+        ++cancel_count;
+        return cancel_ack;
+    }
     arb::LighterIocAck place_ioc_order(const arb::LighterIocRequest& request) override {
         ++ioc_count;
         last_ioc = request;
@@ -166,6 +188,40 @@ void test_maker_price_uses_lighter_anchor_with_hl_post_only_clamp() {
     require(hl.last_limit.size > 0.0, "expected positive order size");
 }
 
+void test_hl_ioc_request_plumbing() {
+    FakeHlExchange hl;
+    FakeLighterExchange lighter;
+    const auto ack = hl.place_ioc_order(arb::HlIocOrderRequest {
+        .coin = "HYPE",
+        .is_buy = false,
+        .price = 9.95,
+        .size = 1.25,
+        .dry_run = false,
+    });
+    require(hl.ioc_count == 1, "expected one HL IOC");
+    require(!hl.last_ioc.is_buy, "expected sell taker IOC");
+    require(ack.ok, "expected fake HL IOC ack");
+}
+
+void test_lighter_limit_and_cancel_plumbing() {
+    FakeHlExchange hl;
+    FakeLighterExchange lighter;
+    const auto limit_ack = lighter.place_limit_order(arb::LighterLimitOrderRequest {
+        .is_ask = true,
+        .price = 10.10,
+        .size = 1.5,
+        .post_only = true,
+        .dry_run = false,
+    });
+    require(lighter.limit_count == 1, "expected one lighter limit placement");
+    require(lighter.last_limit.is_ask, "expected lighter maker ask");
+    require(limit_ack.ok, "expected fake lighter maker ack");
+
+    const auto cancel_ack = lighter.cancel_order(limit_ack.client_order_index, false);
+    require(lighter.cancel_count == 1, "expected one lighter cancel");
+    require(cancel_ack.ok, "expected fake lighter cancel ack");
+}
+
 }  // namespace
 
 int main() {
@@ -176,6 +232,8 @@ int main() {
         test_sends_lighter_hedge_after_hl_fill,
         test_hedge_reject_triggers_hl_unwind,
         test_maker_price_uses_lighter_anchor_with_hl_post_only_clamp,
+        test_hl_ioc_request_plumbing,
+        test_lighter_limit_and_cancel_plumbing,
     };
 
     for (const auto& test : tests) {

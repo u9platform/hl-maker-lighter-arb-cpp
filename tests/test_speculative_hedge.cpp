@@ -13,9 +13,11 @@ namespace {
 struct FakeHlExchange final : arb::HyperliquidExchange {
     arb::Bbo bbo {.bid = 10.0, .ask = 10.01, .quote_age_ms = 1};
     arb::HlLimitOrderAck limit_ack {.ok = true, .message = "", .oid = "oid-1"};
+    arb::HlIocOrderAck ioc_ack {.ok = true, .message = "", .filled_size = 2.5, .avg_fill_price = 10.02};
     arb::HlCancelAck cancel_ack {.ok = true, .message = "", .oid = "oid-1"};
     arb::HlReduceAck reduce_ack {.ok = true, .message = "", .filled_size = 2.5, .avg_fill_price = 10.0};
     int place_count {0};
+    int ioc_count {0};
     int cancel_count {0};
     int reduce_count {0};
     arb::HlLimitOrderRequest last_limit {};
@@ -25,6 +27,10 @@ struct FakeHlExchange final : arb::HyperliquidExchange {
         ++place_count;
         last_limit = request;
         return limit_ack;
+    }
+    arb::HlIocOrderAck place_ioc_order(const arb::HlIocOrderRequest&) override {
+        ++ioc_count;
+        return ioc_ack;
     }
     arb::HlCancelAck cancel_order(const std::string&, const std::string&, bool) override {
         ++cancel_count;
@@ -38,11 +44,23 @@ struct FakeHlExchange final : arb::HyperliquidExchange {
 
 struct FakeLighterExchange final : arb::LighterExchange {
     arb::Bbo bbo {.bid = 10.03, .ask = 10.05, .quote_age_ms = 1};
+    arb::LighterLimitOrderAck limit_ack {.ok = true, .message = "", .tx_hash = "ltx-1", .client_order_index = 1001};
+    arb::LighterCancelAck cancel_ack {.ok = true, .message = "", .tx_hash = "ctx-1", .order_index = 1001};
     arb::LighterIocAck ioc_ack {.ok = true, .message = "", .tx_hash = "tx-1", .fill_confirmed = true, .confirmed_size = 2.5, .fill_price = 10.04};
+    int limit_count {0};
+    int cancel_count {0};
     int ioc_count {0};
     arb::LighterIocRequest last_ioc {};
 
     arb::Bbo get_bbo(std::int64_t) override { return bbo; }
+    arb::LighterLimitOrderAck place_limit_order(const arb::LighterLimitOrderRequest&) override {
+        ++limit_count;
+        return limit_ack;
+    }
+    arb::LighterCancelAck cancel_order(std::int64_t, bool) override {
+        ++cancel_count;
+        return cancel_ack;
+    }
     arb::LighterIocAck place_ioc_order(const arb::LighterIocRequest& request) override {
         ++ioc_count;
         last_ioc = request;
