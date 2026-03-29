@@ -424,6 +424,129 @@ EntryEngineState
 - `dual_maker_reconcile_correction_count`
 - `dual_maker_killswitch_count`
 
+## Performance Instrumentation
+
+双 maker 并行后，性能打点不能只看单笔交易结果，还必须覆盖：
+
+- 单路径执行时延
+- 协调层时延
+- 双边竞争场景
+- 行情质量
+
+建议第一版就把埋点体系写全，避免后续只能看到“整体慢了”，却无法定位慢在哪一层。
+
+### A. 单路径执行埋点
+
+两条路径都要各自保留完整 roundtrip。
+
+#### `HL maker -> LT taker`
+
+- `hl_maker_signal_to_send_ms`
+- `hl_maker_send_to_ack_ms`
+- `hl_maker_ack_to_fill_ms`
+- `hl_fill_to_lt_taker_send_ms`
+- `lt_taker_send_to_ack_ms`
+- `hl_fill_to_lt_taker_ack_total_ms`
+
+#### `LT maker -> HL taker`
+
+- `lt_maker_signal_to_send_ms`
+- `lt_maker_send_to_ack_ms`
+- `lt_maker_ack_to_fill_ms`
+- `lt_fill_to_hl_taker_send_ms`
+- `hl_taker_send_to_ack_ms`
+- `lt_fill_to_hl_taker_ack_total_ms`
+
+### B. 协调层埋点
+
+这是双 maker 系统新增的关键性能层。
+
+必须单独记录：
+
+- `fill_detected_to_other_side_freeze_ms`
+- `fill_detected_to_other_side_cancel_send_ms`
+- `other_side_cancel_send_to_ack_ms`
+- `fill_detected_to_reconcile_start_ms`
+- `reconcile_start_to_done_ms`
+- `residual_detected_to_correction_send_ms`
+- `correction_send_to_ack_ms`
+
+这些指标用于回答：
+
+- 双边并行后慢在交易所，还是慢在协调层
+- 对侧挂单撤不掉是不是系统内部拖慢
+- reconciliation 是否成为新的瓶颈
+
+### C. 竞争场景埋点
+
+双 maker 最危险的场景不是普通成交，而是竞争场景。
+
+建议新增以下计数和时延：
+
+- `dual_maker_overlap_count`
+- `dual_maker_simultaneous_fill_count`
+- `dual_maker_late_fill_after_cancel_count`
+- `dual_maker_cancel_race_count`
+- `dual_maker_reconcile_correction_count`
+- `dual_maker_residual_unwind_count`
+
+以及每类场景的耗时：
+
+- `simultaneous_fill_to_reconcile_done_ms`
+- `late_fill_after_cancel_to_reconcile_done_ms`
+- `residual_unwind_total_ms`
+
+### D. 行情质量埋点
+
+双 maker 更依赖两边行情质量，因此行情埋点仍然是一级指标：
+
+- `hl_quote_age_ms`
+- `lt_quote_age_ms`
+- `cross_venue_alignment_ms`
+- `hl_market_local_rx_to_bbo_update_ms`
+- `lt_market_local_rx_to_bbo_update_ms`
+
+如果后续上线 HL 自建 node，则必须支持 before / after 对比：
+
+- `hl_public_quote_age_ms`
+- `hl_local_node_quote_age_ms`
+
+### E. 分路径聚合要求
+
+所有性能 summary 都应至少按以下维度分组：
+
+- `execution_policy`
+  - `hl_maker_lt_taker`
+  - `lt_maker_hl_taker`
+- `event_type`
+  - normal
+  - cancel_race
+  - simultaneous_fill
+  - late_fill_after_cancel
+  - correction
+  - unwind
+
+至少输出：
+
+- `count`
+- `mean`
+- `p50`
+- `p95`
+- `p99`
+- `max`
+
+### F. 第一版最低要求
+
+如果第一版不能把全部埋点都接完，最低也必须有：
+
+1. 两条路径完整 roundtrip
+2. fill -> other-side cancel send
+3. other-side cancel send -> ack
+4. reconcile start -> done
+5. simultaneous fill / late fill after cancel 的事件计数
+
+否则双 maker 一上线，性能问题将很难定位。
+
 ## 推荐上线顺序
 
 1. 先保留现有 `HL maker -> LT taker`
