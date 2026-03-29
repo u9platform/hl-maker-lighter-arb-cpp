@@ -508,6 +508,14 @@ void NativeLighterTrading::set_position_waiter(PositionWaiter waiter) {
     position_waiter_ = std::move(waiter);
 }
 
+void NativeLighterTrading::set_order_waiter(OrderWaiter waiter) {
+    order_waiter_ = std::move(waiter);
+}
+
+void NativeLighterTrading::set_cancel_waiter(CancelWaiter waiter) {
+    cancel_waiter_ = std::move(waiter);
+}
+
 std::string NativeLighterTrading::create_auth_token(std::int64_t deadline_ms) {
     ensure_client();
     const auto* signer = static_cast<LighterSignerHandle*>(signer_lib_);
@@ -555,9 +563,11 @@ LighterLimitOrderAck NativeLighterTrading::place_limit_order(const LighterLimitO
     if (request.dry_run) {
         return LighterLimitOrderAck {
             .ok = true,
+            .resting_confirmed = true,
             .message = "dry-run",
             .tx_hash = "dry_tx",
             .client_order_index = static_cast<std::int64_t>(current_timestamp_ms()),
+            .order_index = static_cast<std::int64_t>(current_timestamp_ms()),
         };
     }
     ensure_client();
@@ -594,9 +604,11 @@ LighterLimitOrderAck NativeLighterTrading::place_limit_order(const LighterLimitO
     if (!err.empty()) {
         return LighterLimitOrderAck {
             .ok = false,
+            .resting_confirmed = false,
             .message = err,
             .tx_hash = "",
             .client_order_index = client_order_index,
+            .order_index = 0,
             .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
             .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
         };
@@ -605,11 +617,63 @@ LighterLimitOrderAck NativeLighterTrading::place_limit_order(const LighterLimitO
     const std::uint64_t send_start_ns = perf_now_ns();
     const std::string response_body = send_signed_tx(result.txType, tx_info);
     const std::uint64_t ack_ns = perf_now_ns();
+    const bool tx_ok = tx_response_ok(response_body);
+    if (!tx_ok) {
+        return LighterLimitOrderAck {
+            .ok = false,
+            .resting_confirmed = false,
+            .message = response_body,
+            .tx_hash = tx_hash,
+            .client_order_index = client_order_index,
+            .order_index = 0,
+            .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
+            .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
+            .send_tx_ack_latency_ms = static_cast<double>(ack_ns - send_start_ns) / 1000000.0,
+            .place_to_http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+            .http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+        };
+    }
+
+    if (!order_waiter_) {
+        return LighterLimitOrderAck {
+            .ok = false,
+            .resting_confirmed = false,
+            .message = "lighter maker order accepted by sendTx but no resting-order confirmer is configured",
+            .tx_hash = tx_hash,
+            .client_order_index = client_order_index,
+            .order_index = 0,
+            .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
+            .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
+            .send_tx_ack_latency_ms = static_cast<double>(ack_ns - send_start_ns) / 1000000.0,
+            .place_to_http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+            .http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+        };
+    }
+
+    const auto confirmed = order_waiter_(client_order_index, 3000);
+    if (!confirmed.has_value() || !confirmed->resting || confirmed->order_index <= 0) {
+        return LighterLimitOrderAck {
+            .ok = false,
+            .resting_confirmed = false,
+            .message = "lighter maker order was accepted by sendTx but did not reach confirmed resting state",
+            .tx_hash = tx_hash,
+            .client_order_index = client_order_index,
+            .order_index = confirmed.has_value() ? confirmed->order_index : 0,
+            .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
+            .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
+            .send_tx_ack_latency_ms = static_cast<double>(ack_ns - send_start_ns) / 1000000.0,
+            .place_to_http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+            .http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+        };
+    }
+
     return LighterLimitOrderAck {
-        .ok = tx_response_ok(response_body),
+        .ok = true,
+        .resting_confirmed = true,
         .message = response_body,
         .tx_hash = tx_hash,
         .client_order_index = client_order_index,
+        .order_index = confirmed->order_index,
         .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
         .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
         .send_tx_ack_latency_ms = static_cast<double>(ack_ns - send_start_ns) / 1000000.0,
@@ -624,6 +688,14 @@ LighterCancelAck NativeLighterTrading::cancel_order(std::int64_t order_index, bo
             .ok = true,
             .message = "dry-run",
             .tx_hash = "dry_tx",
+            .order_index = order_index,
+        };
+    }
+    if (order_index <= 0) {
+        return LighterCancelAck {
+            .ok = false,
+            .message = "lighter cancel requires a confirmed exchange order_index",
+            .tx_hash = "",
             .order_index = order_index,
         };
     }
@@ -659,8 +731,34 @@ LighterCancelAck NativeLighterTrading::cancel_order(std::int64_t order_index, bo
     const std::uint64_t send_start_ns = perf_now_ns();
     const std::string response_body = send_signed_tx(result.txType, tx_info);
     const std::uint64_t ack_ns = perf_now_ns();
+    const bool tx_ok = tx_response_ok(response_body);
+    if (!tx_ok) {
+        return LighterCancelAck {
+            .ok = false,
+            .message = response_body,
+            .tx_hash = tx_hash,
+            .order_index = order_index,
+            .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
+            .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
+            .send_tx_ack_latency_ms = static_cast<double>(ack_ns - send_start_ns) / 1000000.0,
+            .cancel_to_http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+        };
+    }
+    if (!cancel_waiter_) {
+        return LighterCancelAck {
+            .ok = false,
+            .message = "lighter cancel accepted by sendTx but no post-cancel confirmer is configured",
+            .tx_hash = tx_hash,
+            .order_index = order_index,
+            .nonce_fetch_latency_ms = static_cast<double>(nonce_done_ns - submit_start_ns) / 1000000.0,
+            .sign_order_latency_ms = static_cast<double>(sign_done_ns - nonce_done_ns) / 1000000.0,
+            .send_tx_ack_latency_ms = static_cast<double>(ack_ns - send_start_ns) / 1000000.0,
+            .cancel_to_http_ack_latency_ms = static_cast<double>(ack_ns - submit_start_ns) / 1000000.0,
+        };
+    }
+    const bool cancel_confirmed = cancel_waiter_(order_index, 3000);
     return LighterCancelAck {
-        .ok = tx_response_ok(response_body),
+        .ok = cancel_confirmed,
         .message = response_body,
         .tx_hash = tx_hash,
         .order_index = order_index,

@@ -132,6 +132,10 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
             speculative_hedge_sent_ = false;
             speculative_hedge_size_ = 0.0;
             speculative_hedge_oid_.clear();
+            recently_placed_oids_.erase(oid);
+            active_hl_oid_.reset();
+            strategy_.reset();
+            perf_trace_ = {};
             
             return events;
         } else if (size_diff > 0.001) {
@@ -161,6 +165,10 @@ std::vector<EventLog> MakerHedgeEngine::on_hl_fill(double fill_price, double fil
             // Update position
             const bool hl_is_buy = (dir == Direction::ShortLighterLongHl);
             hl_position_base_ += hl_is_buy ? fill_size_base : -fill_size_base;
+            recently_placed_oids_.erase(oid);
+            active_hl_oid_.reset();
+            strategy_.reset();
+            perf_trace_ = {};
         } else {
             // HL fill is smaller than speculative hedge — unwind the overshoot on Lighter
             const double overshoot = -size_diff;
@@ -623,6 +631,7 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
                 speculative_hedge_size_ = 0.0;
                 speculative_hedge_oid_.clear();
                 active_hl_oid_.reset();
+                strategy_.reset();
             } else {
                 // Cancel failed — order may still be live or already filled.
                 // Do NOT clear active_hl_oid_ or unwind speculative hedge.

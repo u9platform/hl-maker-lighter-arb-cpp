@@ -28,6 +28,12 @@ struct LighterConfig {
     std::int64_t market_index {24};
 };
 
+struct LighterRestingOrder {
+    std::int64_t client_order_index {0};
+    std::int64_t order_index {0};
+    bool resting {false};
+};
+
 class NativeHyperliquidTrading final : public HyperliquidExchange {
   public:
     using ActionTransport = std::function<HlActionTransportResult(const std::string&)>;
@@ -77,12 +83,16 @@ class NativeLighterTrading final : public LighterExchange {
   public:
     using TxTransport = std::function<std::string(std::uint8_t tx_type, const std::string& tx_info_json)>;
     using PositionWaiter = std::function<std::optional<LighterPositionSnapshot>(double baseline_size, int timeout_ms)>;
+    using OrderWaiter = std::function<std::optional<LighterRestingOrder>(std::int64_t client_order_index, int timeout_ms)>;
+    using CancelWaiter = std::function<bool(std::int64_t order_index, int timeout_ms)>;
 
     explicit NativeLighterTrading(LighterConfig config);
     ~NativeLighterTrading() override;
 
     void set_tx_transport(TxTransport transport);
     void set_position_waiter(PositionWaiter waiter);
+    void set_order_waiter(OrderWaiter waiter);
+    void set_cancel_waiter(CancelWaiter waiter);
     [[nodiscard]] std::string create_auth_token(std::int64_t deadline_ms);
 
     [[nodiscard]] Bbo get_bbo(std::int64_t market_id) override;
@@ -106,6 +116,8 @@ class NativeLighterTrading final : public LighterExchange {
     LighterConfig config_;
     TxTransport tx_transport_;
     PositionWaiter position_waiter_;
+    OrderWaiter order_waiter_;
+    CancelWaiter cancel_waiter_;
     void* signer_lib_ {nullptr};
     bool client_ready_ {false};
     int price_decimals_ {4};

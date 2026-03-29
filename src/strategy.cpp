@@ -124,21 +124,6 @@ Action HlMakerLighterHedger::on_market_snapshot(const SpreadSnapshot& snapshot, 
         }
     }
 
-    // If we sent a cancel but haven't confirmed it yet, check if we should re-arm.
-    if (state_ == StrategyState::CancelledPendingConfirm) {
-        if (gate_.armed && can_arm(now_ms)) {
-            // Spread widened again — place a new maker order (overwrite old pending_maker_)
-            pending_maker_ = build_maker_order(snapshot, gate_);
-            state_ = StrategyState::PendingHlMaker;
-
-            Action action;
-            action.type = ActionType::PlaceHlMaker;
-            action.reason = "spread re-widened after cancel";
-            action.maker_order = pending_maker_;
-            return action;
-        }
-    }
-
     return {};
 }
 
