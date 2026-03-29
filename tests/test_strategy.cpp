@@ -260,6 +260,31 @@ void test_native_lighter_cancel_requires_confirmed_order_index() {
     require(!ack.ok, "expected lighter cancel to reject missing order_index");
 }
 
+void test_lighter_maker_hl_taker_path() {
+    FakeHlExchange hl;
+    FakeLighterExchange lighter;
+    hl.ioc_ack.ok = true;
+    hl.ioc_ack.filled_size = 2.5;
+    hl.ioc_ack.avg_fill_price = 10.02;
+
+    arb::EngineConfig config;
+    config.strategy.spread_bps = 2.0;
+    config.strategy.cancel_band_bps = 0.5;
+    config.lighter_order_interval_ms = 0;
+    arb::LighterMakerTakerEngine engine(config, hl, lighter);
+
+    const auto initial_logs = engine.on_market_data(1000);
+    require(!initial_logs.empty(), "expected lighter maker placement logs");
+    require(lighter.limit_count == 1, "expected one lighter maker placement");
+    require(engine.active_lighter_order_index().has_value(), "expected active lighter order");
+
+    const auto snapshot = engine.collect_snapshot();
+    const auto fill_logs = engine.on_lighter_fill(10.05, 2.5, snapshot, lighter.limit_ack.order_index, lighter.limit_ack.client_order_index, 1000);
+    require(!fill_logs.empty(), "expected hl taker hedge logs");
+    require(hl.ioc_count == 1, "expected one HL taker hedge");
+    require(!engine.active_lighter_order_index().has_value(), "expected active lighter order cleared after hedge");
+}
+
 void test_speculative_reconciliation_closes_order_lifecycle() {
     FakeHlExchange hl;
     FakeLighterExchange lighter;
@@ -307,6 +332,7 @@ int main() {
         test_hl_ioc_request_plumbing,
         test_lighter_limit_and_cancel_plumbing,
         test_native_lighter_cancel_requires_confirmed_order_index,
+        test_lighter_maker_hl_taker_path,
         test_speculative_reconciliation_closes_order_lifecycle,
     };
 

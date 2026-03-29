@@ -27,6 +27,11 @@
 
 namespace {
 
+enum class ExecutionPolicy {
+    HlMakerLtTaker,
+    LtMakerHlTaker,
+};
+
 // Query HL clearinghouseState for current position of a coin.
 // Returns size in base units (negative = short).
 double query_hl_position(const std::string& api_url, const std::string& address, const std::string& coin) {
@@ -82,6 +87,19 @@ struct FillEvent {
 std::mutex g_fill_mu;
 std::queue<FillEvent> g_fill_queue;
 
+struct LighterFillEvent {
+    double price {0.0};
+    double size {0.0};
+    bool is_ask {false};
+    std::int64_t order_index {0};
+    std::int64_t client_order_index {0};
+    std::string tx_hash;
+    std::uint64_t local_rx_ns {0};
+};
+
+std::mutex g_lighter_fill_mu;
+std::queue<LighterFillEvent> g_lighter_fill_queue;
+
 void signal_handler(int /*sig*/) {
     g_running.store(false, std::memory_order_release);
     g_cv.notify_all();
@@ -118,6 +136,13 @@ int env_int(const char* name, int fallback) {
     try { return std::stoi(val); } catch (...) { return fallback; }
 }
 
+ExecutionPolicy execution_policy_from_env(const std::string& value) {
+    if (value == "lt_maker_hl_taker") {
+        return ExecutionPolicy::LtMakerHlTaker;
+    }
+    return ExecutionPolicy::HlMakerLtTaker;
+}
+
 std::int64_t current_timestamp_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
@@ -146,6 +171,8 @@ int main() {
     const int lighter_api_key_index = env_int("LIGHTER_API_KEY_INDEX", 0);
     const std::string hl_user_address = env_or("HL_USER_ADDRESS", "");
     const bool dry_run = env_or("DRY_RUN", "true") == "true";
+    const std::string execution_policy_raw = env_or("EXECUTION_POLICY", "hl_maker_lt_taker");
+    const ExecutionPolicy execution_policy = execution_policy_from_env(execution_policy_raw);
 
     const double spread_bps = env_double("SPREAD_BPS", 2.0);
     const double close_spread_bps = env_double("CLOSE_SPREAD_BPS", 0.0);  // 0 = same as spread_bps
@@ -153,9 +180,12 @@ int main() {
     const double pair_size = env_double("PAIR_SIZE_USD", 25.0);
     const double max_pos = env_double("MAX_POSITION_USD", 100.0);
 
-    std::cerr << "=== HL Maker / Lighter Taker Arb (C++) ===\n"
+    std::cerr << "=== "
+              << (execution_policy == ExecutionPolicy::HlMakerLtTaker ? "HL Maker / Lighter Taker" : "Lighter Maker / HL Taker")
+              << " Arb (C++) ===\n"
               << "version=" << ARB_GIT_VERSION
               << " "
+              << "execution_policy=" << execution_policy_raw << " "
               << "dry_run=" << (dry_run ? "true" : "false")
               << " spread=" << spread_bps << " close_spread=" << (close_spread_bps > 0.0 ? close_spread_bps : spread_bps) << " cancel_band=" << cancel_band
               << " pair_size=" << pair_size << " max_pos=" << max_pos
@@ -199,21 +229,58 @@ int main() {
         .api_key_index = lighter_api_key_index,
         .market_index = 24,
     });
+    const std::string lighter_auth_token = lighter_native.create_auth_token(current_timestamp_ms() + 24LL * 60LL * 60LL * 1000LL);
     arb::LighterPositionFeed lighter_position_feed({
         .account_index = lighter_account_index,
         .market_index = 24,
-        .auth_token = lighter_native.create_auth_token(current_timestamp_ms() + 24LL * 60LL * 60LL * 1000LL),
+        .auth_token = lighter_auth_token,
     });
-    lighter_position_feed.start();
-    if (lighter_position_feed.wait_until_connected(2000)) {
-        lighter_native.set_position_waiter(
-            [&lighter_position_feed](double baseline_size, int timeout_ms) {
-                return lighter_position_feed.wait_for_position_change(baseline_size, timeout_ms);
-            }
-        );
-        std::cerr << "[main] lighter position confirmation=ws_account_all_positions\n";
+    std::unique_ptr<arb::LighterAccountFeed> lighter_account_feed;
+    if (execution_policy == ExecutionPolicy::HlMakerLtTaker) {
+        lighter_position_feed.start();
+        if (lighter_position_feed.wait_until_connected(2000)) {
+            lighter_native.set_position_waiter(
+                [&lighter_position_feed](double baseline_size, int timeout_ms) {
+                    return lighter_position_feed.wait_for_position_change(baseline_size, timeout_ms);
+                }
+            );
+            std::cerr << "[main] lighter position confirmation=ws_account_all_positions\n";
+        } else {
+            std::cerr << "[main] WARNING: lighter position feed unavailable, falling back to direct account query\n";
+        }
     } else {
-        std::cerr << "[main] WARNING: lighter position feed unavailable, falling back to direct account query\n";
+        lighter_account_feed = std::make_unique<arb::LighterAccountFeed>(arb::LighterAccountFeed::Config {
+            .account_index = lighter_account_index,
+            .market_index = 24,
+            .auth_token = lighter_auth_token,
+        });
+        lighter_account_feed->set_on_fill([&](const arb::LighterTradeFill& fill) {
+            {
+                std::lock_guard lock(g_lighter_fill_mu);
+                g_lighter_fill_queue.push(LighterFillEvent {
+                    .price = fill.price,
+                    .size = fill.size,
+                    .is_ask = fill.is_ask,
+                    .order_index = fill.order_index,
+                    .client_order_index = fill.client_order_index,
+                    .tx_hash = fill.tx_hash,
+                    .local_rx_ns = arb::perf_now_ns(),
+                });
+            }
+            publish_event();
+        });
+        lighter_account_feed->start();
+        if (lighter_account_feed->wait_until_connected(2000)) {
+            lighter_native.set_order_waiter([&](std::int64_t client_order_index, int timeout_ms) {
+                return lighter_account_feed->wait_for_order_resting(client_order_index, timeout_ms);
+            });
+            lighter_native.set_cancel_waiter([&](std::int64_t order_index, int timeout_ms) {
+                return lighter_account_feed->wait_for_cancel(order_index, timeout_ms);
+            });
+            std::cerr << "[main] lighter maker confirmation=account_orders/account_all_trades\n";
+        } else {
+            std::cerr << "[main] WARNING: lighter account feed unavailable; reverse maker path will safe-fail\n";
+        }
     }
     arb::LighterWsSendTxTransport lighter_ws_sendtx;
     lighter_ws_sendtx.start();
@@ -265,17 +332,23 @@ int main() {
         }
     }
 
-    arb::MakerHedgeEngine engine(engine_config, hl_exchange, lighter_exchange, &journal);
+    std::unique_ptr<arb::MakerHedgeEngine> hl_maker_engine;
+    std::unique_ptr<arb::LighterMakerTakerEngine> lighter_maker_engine;
+    if (execution_policy == ExecutionPolicy::HlMakerLtTaker) {
+        hl_maker_engine = std::make_unique<arb::MakerHedgeEngine>(engine_config, hl_exchange, lighter_exchange, &journal);
+    } else {
+        lighter_maker_engine = std::make_unique<arb::LighterMakerTakerEngine>(engine_config, hl_exchange, lighter_exchange, &journal);
+    }
 
     // --- Sync initial HL position from API ---
-    {
+    if (execution_policy == ExecutionPolicy::HlMakerLtTaker) {
         const double init_pos = query_hl_position(
             env_or("HL_API_URL", "https://api.hyperliquid.xyz"),
             env_or("HL_USER_ADDRESS", ""),
             engine_config.hl_coin
         );
         if (init_pos != 0.0) {
-            engine.set_hl_position(init_pos);
+            hl_maker_engine->set_hl_position(init_pos);
             std::cerr << "[main] synced HL position: " << init_pos << " " << engine_config.hl_coin << "\n";
         }
     }
@@ -312,7 +385,7 @@ int main() {
 
     // --- Fill Feed ---
     std::unique_ptr<arb::HlFillFeed> fill_feed;
-    if (!hl_user_address.empty()) {
+    if (execution_policy == ExecutionPolicy::HlMakerLtTaker && !hl_user_address.empty()) {
         arb::HlFillFeed::Config fill_cfg;
         fill_cfg.user_address = hl_user_address;
         fill_feed = std::make_unique<arb::HlFillFeed>(fill_cfg);
@@ -333,7 +406,7 @@ int main() {
                 risk.activate_kill_switch("fill feed disconnected: " + reason);
                 std::cerr << "[risk] " << timestamp_str() << " KILL SWITCH: fill feed disconnect - " << reason << '\n';
                 // Cancel any active maker order immediately
-                const auto& active = engine.active_hl_oid();
+                const auto& active = hl_maker_engine->active_hl_oid();
                 if (active.has_value()) {
                     hl_exchange.cancel_order("HYPE", *active, dry_run);
                     std::cerr << "[risk] cancelled active HL order due to fill feed disconnect\n";
@@ -353,7 +426,8 @@ int main() {
     // Wait for connectivity.
     std::cerr << "[main] waiting for WS connections...\n";
     for (int i = 0; i < 100 && g_running.load(); ++i) {
-        if (feed.hl_connected() && feed.lighter_connected()) break;
+        if (feed.hl_connected() && feed.lighter_connected()
+            && (execution_policy == ExecutionPolicy::HlMakerLtTaker || !lighter_account_feed || lighter_account_feed->is_connected())) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
@@ -370,7 +444,10 @@ int main() {
     auto next_housekeeping = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     while (g_running.load(std::memory_order_relaxed)) {
         auto wake_deadline = next_housekeeping;
-        if (const auto retry_ms = engine.next_retry_steady_ms(); retry_ms.has_value()) {
+        const auto retry_ms = execution_policy == ExecutionPolicy::HlMakerLtTaker
+            ? hl_maker_engine->next_retry_steady_ms()
+            : lighter_maker_engine->next_retry_steady_ms();
+        if (retry_ms.has_value()) {
             wake_deadline = std::min(
                 wake_deadline,
                 std::chrono::steady_clock::time_point {std::chrono::milliseconds {*retry_ms}}
@@ -391,7 +468,7 @@ int main() {
         }
 
         // --- Process queued fill events on main thread (thread-safe) ---
-        {
+        if (execution_policy == ExecutionPolicy::HlMakerLtTaker) {
             std::lock_guard lock(g_fill_mu);
             while (!g_fill_queue.empty()) {
                 const auto fill = std::move(g_fill_queue.front());
@@ -404,7 +481,31 @@ int main() {
 
                 // BUG FIX 3: Pass the OID to engine so it can handle the race condition
                 const auto fill_snap = feed.snapshot();
-                const auto logs = engine.on_hl_fill(fill.price, fill.size, fill_snap, fill.oid, fill.local_rx_ns, fill.fee);
+                const auto logs = hl_maker_engine->on_hl_fill(fill.price, fill.size, fill_snap, fill.oid, fill.local_rx_ns, fill.fee);
+                for (const auto& log : logs) {
+                    std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
+                }
+                if (!logs.empty()) {
+                    ++trade_count;
+                }
+            }
+        }
+
+        if (execution_policy == ExecutionPolicy::LtMakerHlTaker) {
+            std::lock_guard lock(g_lighter_fill_mu);
+            while (!g_lighter_fill_queue.empty()) {
+                const auto fill = std::move(g_lighter_fill_queue.front());
+                g_lighter_fill_queue.pop();
+
+                std::cerr << "[lighter-fill] " << timestamp_str()
+                          << " px=" << fill.price << " sz=" << fill.size
+                          << " " << (fill.is_ask ? "ASK" : "BID")
+                          << " order_index=" << fill.order_index
+                          << " client_order_index=" << fill.client_order_index
+                          << " tx=" << fill.tx_hash << '\n';
+
+                const auto fill_snap = feed.snapshot();
+                const auto logs = lighter_maker_engine->on_lighter_fill(fill.price, fill.size, fill_snap, fill.order_index, fill.client_order_index, fill.local_rx_ns);
                 for (const auto& log : logs) {
                     std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
                 }
@@ -415,13 +516,13 @@ int main() {
         }
 
         // --- Process queued trade events on main thread (thread-safe) ---
-        {
+        if (execution_policy == ExecutionPolicy::HlMakerLtTaker) {
             std::lock_guard lock(g_trade_mu);
             while (!g_trade_queue.empty()) {
                 const auto trade = std::move(g_trade_queue.front());
                 g_trade_queue.pop();
 
-                const auto trade_logs = engine.on_trade_event(trade);
+                const auto trade_logs = hl_maker_engine->on_trade_event(trade);
                 for (const auto& log : trade_logs) {
                     std::cerr << "[trade] " << timestamp_str() << " " << log.message << '\n';
                 }
@@ -450,21 +551,21 @@ int main() {
 
         // BUG FIX 2: Check fill feed status every tick (not just in telemetry)
         // Use is_subscribed() instead of is_connected() to ensure we're actually receiving fills
-        const bool fills_subscribed = !fill_feed || fill_feed->is_subscribed();
-        if (!fills_subscribed && !risk.kill_switch_active()) {
+        const bool fills_subscribed = execution_policy == ExecutionPolicy::LtMakerHlTaker || !fill_feed || fill_feed->is_subscribed();
+        if (execution_policy == ExecutionPolicy::HlMakerLtTaker && !fills_subscribed && !risk.kill_switch_active()) {
             risk.activate_kill_switch("fill feed not subscribed");
             std::cerr << "[risk] " << timestamp_str() << " KILL SWITCH: fill feed not subscribed\n";
             // Cancel any active maker order immediately
-            const auto& active = engine.active_hl_oid();
+            const auto& active = hl_maker_engine->active_hl_oid();
             if (active.has_value()) {
                 hl_exchange.cancel_order("HYPE", *active, dry_run);
                 std::cerr << "[risk] cancelled active HL order due to fill feed not subscribed\n";
             }
-        } else if (fills_subscribed && risk.kill_switch_active() && 
+        } else if (execution_policy == ExecutionPolicy::HlMakerLtTaker && fills_subscribed && risk.kill_switch_active() && 
                    (risk.kill_switch_reason() == "fill feed not subscribed" || 
                     risk.kill_switch_reason().find("fill feed disconnected") != std::string::npos)) {
             // Position reconciliation: check if fills were missed during disconnect
-            const double engine_pos = engine.hl_position_base();
+            const double engine_pos = hl_maker_engine->hl_position_base();
             const double actual_pos = query_hl_position(
                 env_or("HL_API_URL", "https://api.hyperliquid.xyz"),
                 env_or("HL_USER_ADDRESS", ""),
@@ -475,7 +576,7 @@ int main() {
                           << " POSITION MISMATCH after fill feed reconnect!"
                           << " engine=" << engine_pos << " actual=" << actual_pos
                           << " diff=" << (actual_pos - engine_pos) << "\n";
-                engine.set_hl_position(actual_pos);
+                hl_maker_engine->set_hl_position(actual_pos);
                 std::cerr << "[risk] " << timestamp_str()
                           << " synced engine position to " << actual_pos << "\n";
             }
@@ -499,7 +600,9 @@ int main() {
         if (risk.kill_switch_active()) continue;
 
         // Run engine — collect_snapshot() uses WS exchange adapters (no REST overhead).
-        const auto logs = engine.on_market_data(now_ms);
+        const auto logs = execution_policy == ExecutionPolicy::HlMakerLtTaker
+            ? hl_maker_engine->on_market_data(now_ms)
+            : lighter_maker_engine->on_market_data(now_ms);
         for (const auto& log : logs) {
             std::cerr << "[engine] " << timestamp_str() << " " << log.message << '\n';
         }
@@ -512,7 +615,13 @@ int main() {
                 std::chrono::steady_clock::now() - start_time).count();
 
             // BUG FIX 2: Use is_subscribed() instead of is_connected() for more accurate status
-            const bool fills_subscribed = !fill_feed || fill_feed->is_subscribed();
+            const bool fills_subscribed = execution_policy == ExecutionPolicy::LtMakerHlTaker || !fill_feed || fill_feed->is_subscribed();
+            const int state = execution_policy == ExecutionPolicy::HlMakerLtTaker
+                ? static_cast<int>(hl_maker_engine->strategy().state())
+                : static_cast<int>(lighter_maker_engine->strategy().state());
+            const double pos = execution_policy == ExecutionPolicy::HlMakerLtTaker
+                ? hl_maker_engine->hl_position_base()
+                : 0.0;
             std::cerr << "[telem] " << timestamp_str()
                       << " ticks=" << tick_count << " trades=" << trade_count
                       << " uptime=" << uptime_s << "s"
@@ -522,8 +631,8 @@ int main() {
                       << " hl_age=" << snap.hl.quote_age_ms << "ms"
                       << " lt=" << snap.lighter.bid << "/" << snap.lighter.ask
                       << " lt_age=" << snap.lighter.quote_age_ms << "ms"
-                      << " state=" << static_cast<int>(engine.strategy().state())
-                      << " pos=" << std::setprecision(2) << engine.hl_position_base()
+                      << " state=" << state
+                      << " pos=" << std::setprecision(2) << pos
                       << " fills_ws=" << (fills_subscribed ? "SUBSCRIBED" : "NOT_SUBSCRIBED") << '\n';
 
             for (const auto& line : arb::PerfCollector::instance().drain_summary_lines()) {
@@ -538,7 +647,10 @@ int main() {
     // --- Shutdown ---
     std::cerr << "\n[main] shutting down...\n";
     journal.flush();
-    lighter_position_feed.stop();
+    if (execution_policy == ExecutionPolicy::HlMakerLtTaker) {
+        lighter_position_feed.stop();
+    }
+    if (lighter_account_feed) lighter_account_feed->stop();
     lighter_ws_sendtx.stop();
     hl_ws_post.stop();
     feed.stop();

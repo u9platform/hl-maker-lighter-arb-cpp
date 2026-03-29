@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arb/exchange.hpp"
 #include "arb/types.hpp"
 #include "arb/ws_client.hpp"
 
@@ -11,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 namespace arb {
 
@@ -178,6 +180,76 @@ class LighterPositionFeed {
     std::optional<LighterPositionSnapshot> latest_;
     std::uint64_t version_ {0};
     std::atomic<bool> subscribed_ {false};
+};
+
+struct LighterOrderUpdate {
+    std::int64_t order_index {0};
+    std::int64_t client_order_index {0};
+    bool is_ask {false};
+    double price {0.0};
+    double remaining_base_amount {0.0};
+    double filled_base_amount {0.0};
+    std::string status;
+
+    [[nodiscard]] bool resting() const noexcept {
+        return status == "open" || status == "in-progress";
+    }
+
+    [[nodiscard]] bool cancelled() const noexcept {
+        return status.rfind("canceled", 0) == 0;
+    }
+};
+
+struct LighterTradeFill {
+    std::int64_t order_index {0};
+    std::int64_t client_order_index {0};
+    bool is_ask {false};
+    double price {0.0};
+    double size {0.0};
+    std::string tx_hash;
+    std::uint64_t exchange_time_ms {0};
+};
+
+class LighterAccountFeed {
+  public:
+    struct Config {
+        std::string ws_host {"mainnet.zklighter.elliot.ai"};
+        std::string ws_path {"/stream"};
+        std::int64_t account_index {0};
+        int market_index {24};
+        std::string auth_token;
+    };
+
+    using FillCallback = std::function<void(const LighterTradeFill&)>;
+
+    explicit LighterAccountFeed(Config config);
+    ~LighterAccountFeed();
+
+    LighterAccountFeed(const LighterAccountFeed&) = delete;
+    LighterAccountFeed& operator=(const LighterAccountFeed&) = delete;
+
+    void set_on_fill(FillCallback cb);
+    void start();
+    void stop();
+    [[nodiscard]] bool is_connected() const noexcept;
+    [[nodiscard]] bool is_subscribed() const noexcept;
+    [[nodiscard]] bool wait_until_connected(int timeout_ms) const;
+    [[nodiscard]] std::optional<LighterRestingOrder> wait_for_order_resting(std::int64_t client_order_index, int timeout_ms);
+    [[nodiscard]] bool wait_for_cancel(std::int64_t order_index, int timeout_ms);
+
+  private:
+    void on_message(const std::string& msg);
+    void subscribe();
+
+    Config config_;
+    std::unique_ptr<WsClient> ws_;
+    mutable std::mutex mu_;
+    std::condition_variable cv_;
+    std::unordered_map<std::int64_t, LighterOrderUpdate> orders_by_client_;
+    std::unordered_map<std::int64_t, LighterOrderUpdate> orders_by_index_;
+    FillCallback on_fill_;
+    std::atomic<bool> orders_subscribed_ {false};
+    std::atomic<bool> trades_subscribed_ {false};
 };
 
 }  // namespace arb

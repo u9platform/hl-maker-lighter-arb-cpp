@@ -113,6 +113,138 @@ std::optional<LighterPositionSnapshot> parse_lighter_position_update(const std::
     return snap;
 }
 
+bool parse_lighter_order_updates(const std::string& msg, int market_index, std::vector<LighterOrderUpdate>& orders) {
+    if (msg.find("account_orders:") == std::string::npos || msg.find("\"orders\"") == std::string::npos) {
+        return false;
+    }
+
+    const std::string market_key = "\"" + std::to_string(market_index) + "\":[";
+    const auto market_pos = msg.find(market_key);
+    if (market_pos == std::string::npos) {
+        return false;
+    }
+
+    std::size_t search_pos = market_pos;
+    while (true) {
+        const auto idx_pos = msg.find("\"order_index\"", search_pos);
+        if (idx_pos == std::string::npos) break;
+        const auto next_market = msg.find("\"" + std::to_string(market_index) + "\":[", idx_pos + 1);
+        if (next_market != std::string::npos && idx_pos > next_market) break;
+
+        const std::string section = msg.substr(idx_pos, 1024);
+        std::smatch match;
+        const std::regex order_idx_pattern(R"REGEX("order_index":([0-9]+))REGEX");
+        const std::regex client_idx_pattern(R"REGEX("client_order_index":([0-9]+))REGEX");
+        const std::regex is_ask_pattern(R"REGEX("is_ask":(true|false))REGEX");
+        const std::regex price_pattern(R"REGEX("price":"([^"]+)")REGEX");
+        const std::regex remaining_pattern(R"REGEX("remaining_base_amount":"([^"]+)")REGEX");
+        const std::regex filled_pattern(R"REGEX("filled_base_amount":"([^"]+)")REGEX");
+        const std::regex status_pattern(R"REGEX("status":"([^"]+)")REGEX");
+
+        LighterOrderUpdate order;
+        if (!std::regex_search(section, match, order_idx_pattern)) break;
+        order.order_index = std::stoll(match[1].str());
+        if (std::regex_search(section, match, client_idx_pattern)) {
+            order.client_order_index = std::stoll(match[1].str());
+        }
+        if (std::regex_search(section, match, is_ask_pattern)) {
+            order.is_ask = match[1].str() == "true";
+        }
+        if (std::regex_search(section, match, price_pattern)) {
+            order.price = std::stod(match[1].str());
+        }
+        if (std::regex_search(section, match, remaining_pattern)) {
+            order.remaining_base_amount = std::stod(match[1].str());
+        }
+        if (std::regex_search(section, match, filled_pattern)) {
+            order.filled_base_amount = std::stod(match[1].str());
+        }
+        if (std::regex_search(section, match, status_pattern)) {
+            order.status = match[1].str();
+        }
+        orders.push_back(std::move(order));
+        search_pos = idx_pos + 1;
+    }
+
+    return !orders.empty();
+}
+
+bool parse_lighter_account_trades(const std::string& msg, std::int64_t account_index, int market_index, std::vector<LighterTradeFill>& fills) {
+    if (msg.find("account_all_trades:") == std::string::npos || msg.find("\"trades\"") == std::string::npos) {
+        return false;
+    }
+
+    const std::string market_key = "\"" + std::to_string(market_index) + "\":[";
+    const auto market_pos = msg.find(market_key);
+    if (market_pos == std::string::npos) {
+        return false;
+    }
+
+    std::size_t search_pos = market_pos;
+    while (true) {
+        const auto tx_pos = msg.find("\"tx_hash\"", search_pos);
+        if (tx_pos == std::string::npos) break;
+        const std::string section = msg.substr(tx_pos, 1024);
+        std::smatch match;
+        const std::regex tx_pattern(R"REGEX("tx_hash":"([^"]+)")REGEX");
+        const std::regex price_pattern(R"REGEX("price":"([^"]+)")REGEX");
+        const std::regex size_pattern(R"REGEX("size":"([^"]+)")REGEX");
+        const std::regex is_maker_ask_pattern(R"REGEX("is_maker_ask":(true|false))REGEX");
+        const std::regex ask_account_pattern(R"REGEX("ask_account_id":([0-9]+))REGEX");
+        const std::regex bid_account_pattern(R"REGEX("bid_account_id":([0-9]+))REGEX");
+        const std::regex ask_id_pattern(R"REGEX("ask_id":([0-9]+))REGEX");
+        const std::regex bid_id_pattern(R"REGEX("bid_id":([0-9]+))REGEX");
+        const std::regex ask_client_pattern(R"REGEX("ask_client_id":([0-9]+))REGEX");
+        const std::regex bid_client_pattern(R"REGEX("bid_client_id":([0-9]+))REGEX");
+        const std::regex timestamp_pattern(R"REGEX("timestamp":([0-9]+))REGEX");
+
+        if (!std::regex_search(section, match, tx_pattern)) break;
+        LighterTradeFill fill;
+        fill.tx_hash = match[1].str();
+        if (std::regex_search(section, match, price_pattern)) {
+            fill.price = std::stod(match[1].str());
+        }
+        if (std::regex_search(section, match, size_pattern)) {
+            fill.size = std::stod(match[1].str());
+        }
+
+        bool is_maker_ask = false;
+        std::int64_t ask_account = 0;
+        std::int64_t bid_account = 0;
+        std::int64_t ask_id = 0;
+        std::int64_t bid_id = 0;
+        std::int64_t ask_client = 0;
+        std::int64_t bid_client = 0;
+        if (std::regex_search(section, match, is_maker_ask_pattern)) {
+            is_maker_ask = match[1].str() == "true";
+        }
+        if (std::regex_search(section, match, ask_account_pattern)) ask_account = std::stoll(match[1].str());
+        if (std::regex_search(section, match, bid_account_pattern)) bid_account = std::stoll(match[1].str());
+        if (std::regex_search(section, match, ask_id_pattern)) ask_id = std::stoll(match[1].str());
+        if (std::regex_search(section, match, bid_id_pattern)) bid_id = std::stoll(match[1].str());
+        if (std::regex_search(section, match, ask_client_pattern)) ask_client = std::stoll(match[1].str());
+        if (std::regex_search(section, match, bid_client_pattern)) bid_client = std::stoll(match[1].str());
+        if (std::regex_search(section, match, timestamp_pattern)) fill.exchange_time_ms = std::stoull(match[1].str());
+
+        const bool account_is_maker_ask = is_maker_ask && ask_account == account_index;
+        const bool account_is_maker_bid = !is_maker_ask && bid_account == account_index;
+        if (account_is_maker_ask) {
+            fill.is_ask = true;
+            fill.order_index = ask_id;
+            fill.client_order_index = ask_client;
+            fills.push_back(std::move(fill));
+        } else if (account_is_maker_bid) {
+            fill.is_ask = false;
+            fill.order_index = bid_id;
+            fill.client_order_index = bid_client;
+            fills.push_back(std::move(fill));
+        }
+        search_pos = tx_pos + 1;
+    }
+
+    return !fills.empty();
+}
+
 // Parse HL userFills WS message for fill events.
 // {"channel":"userFills","data":{"isSnapshot":false,"user":"0x...","fills":[{"coin":"HYPE","px":"21.50","sz":"2.5","side":"B","oid":12345,...}]}}
 struct ParsedFill {
@@ -664,6 +796,149 @@ void LighterPositionFeed::subscribe() {
         + std::to_string(config_.account_index)
         + "\",\"auth\":\"" + config_.auth_token + "\"}";
     ws_->send(sub);
+}
+
+LighterAccountFeed::LighterAccountFeed(Config config) : config_(std::move(config)) {}
+
+LighterAccountFeed::~LighterAccountFeed() {
+    stop();
+}
+
+void LighterAccountFeed::set_on_fill(FillCallback cb) {
+    on_fill_ = std::move(cb);
+}
+
+void LighterAccountFeed::start() {
+    WsClient::Config ws_cfg;
+    ws_cfg.host = config_.ws_host;
+    ws_cfg.port = "443";
+    ws_cfg.path = config_.ws_path;
+    ws_cfg.ping_interval_sec = 15;
+
+    ws_ = std::make_unique<WsClient>(ws_cfg);
+    ws_->set_on_message([this](const std::string& msg) { on_message(msg); });
+    ws_->set_on_disconnect([this](const std::string& reason) {
+        std::cerr << "[lighter-account] disconnected: " << reason << '\n';
+        orders_subscribed_.store(false, std::memory_order_release);
+        trades_subscribed_.store(false, std::memory_order_release);
+        subscribe();
+        cv_.notify_all();
+    });
+    subscribe();
+    ws_->connect();
+}
+
+void LighterAccountFeed::stop() {
+    if (ws_) ws_->close();
+}
+
+bool LighterAccountFeed::is_connected() const noexcept {
+    return ws_ && ws_->is_connected();
+}
+
+bool LighterAccountFeed::is_subscribed() const noexcept {
+    return is_connected() && orders_subscribed_.load(std::memory_order_relaxed) && trades_subscribed_.load(std::memory_order_relaxed);
+}
+
+bool LighterAccountFeed::wait_until_connected(int timeout_ms) const {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (is_connected()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return is_connected();
+}
+
+std::optional<LighterRestingOrder> LighterAccountFeed::wait_for_order_resting(std::int64_t client_order_index, int timeout_ms) {
+    std::unique_lock lock(mu_);
+    const bool ready = cv_.wait_for(
+        lock,
+        std::chrono::milliseconds(timeout_ms),
+        [&] {
+            const auto it = orders_by_client_.find(client_order_index);
+            return it != orders_by_client_.end() && it->second.resting() && it->second.order_index > 0;
+        }
+    );
+    if (!ready) {
+        return std::nullopt;
+    }
+    const auto& order = orders_by_client_.at(client_order_index);
+    return LighterRestingOrder {
+        .client_order_index = order.client_order_index,
+        .order_index = order.order_index,
+        .resting = true,
+    };
+}
+
+bool LighterAccountFeed::wait_for_cancel(std::int64_t order_index, int timeout_ms) {
+    std::unique_lock lock(mu_);
+    return cv_.wait_for(
+        lock,
+        std::chrono::milliseconds(timeout_ms),
+        [&] {
+            const auto it = orders_by_index_.find(order_index);
+            return it != orders_by_index_.end() && it->second.cancelled();
+        }
+    );
+}
+
+void LighterAccountFeed::on_message(const std::string& msg) {
+    if (msg.find("\"connected\"") != std::string::npos) {
+        subscribe();
+        return;
+    }
+
+    if (msg.find("\"ping\"") != std::string::npos) {
+        ws_->send("{\"type\":\"pong\"}");
+        return;
+    }
+
+    if (!orders_subscribed_.load(std::memory_order_relaxed)
+        && msg.find("\"subscribed/account_orders\"") != std::string::npos) {
+        orders_subscribed_.store(true, std::memory_order_release);
+        std::cerr << "[lighter-account] subscribed to account_orders:" << config_.market_index << "/" << config_.account_index << '\n';
+    }
+    if (!trades_subscribed_.load(std::memory_order_relaxed)
+        && msg.find("\"subscribed/account_all_trades\"") != std::string::npos) {
+        trades_subscribed_.store(true, std::memory_order_release);
+        std::cerr << "[lighter-account] subscribed to account_all_trades:" << config_.account_index << '\n';
+    }
+
+    std::vector<LighterOrderUpdate> orders;
+    if (parse_lighter_order_updates(msg, config_.market_index, orders)) {
+        {
+            std::lock_guard lock(mu_);
+            for (const auto& order : orders) {
+                orders_by_client_[order.client_order_index] = order;
+                orders_by_index_[order.order_index] = order;
+            }
+        }
+        cv_.notify_all();
+    }
+
+    std::vector<LighterTradeFill> fills;
+    if (parse_lighter_account_trades(msg, config_.account_index, config_.market_index, fills)) {
+        for (const auto& fill : fills) {
+            if (on_fill_) {
+                on_fill_(fill);
+            }
+        }
+    }
+}
+
+void LighterAccountFeed::subscribe() {
+    const std::string sub_orders = "{\"type\":\"subscribe\",\"channel\":\"account_orders/"
+        + std::to_string(config_.market_index)
+        + "/"
+        + std::to_string(config_.account_index)
+        + "\",\"auth\":\"" + config_.auth_token + "\"}";
+    const std::string sub_trades = "{\"type\":\"subscribe\",\"channel\":\"account_all_trades/"
+        + std::to_string(config_.account_index)
+        + "\",\"auth\":\"" + config_.auth_token + "\"}";
+    ws_->send(sub_orders);
+    ws_->send(sub_trades);
 }
 
 }  // namespace arb

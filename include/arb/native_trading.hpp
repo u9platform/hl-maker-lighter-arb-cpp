@@ -28,12 +28,6 @@ struct LighterConfig {
     std::int64_t market_index {24};
 };
 
-struct LighterRestingOrder {
-    std::int64_t client_order_index {0};
-    std::int64_t order_index {0};
-    bool resting {false};
-};
-
 class NativeHyperliquidTrading final : public HyperliquidExchange {
   public:
     using ActionTransport = std::function<HlActionTransportResult(const std::string&)>;

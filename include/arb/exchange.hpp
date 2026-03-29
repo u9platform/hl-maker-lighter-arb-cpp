@@ -125,6 +125,12 @@ struct LighterCancelAck {
     double cancel_to_http_ack_latency_ms {0.0};
 };
 
+struct LighterRestingOrder {
+    std::int64_t client_order_index {0};
+    std::int64_t order_index {0};
+    bool resting {false};
+};
+
 struct FillEvent {
     std::string venue;
     std::string order_id;

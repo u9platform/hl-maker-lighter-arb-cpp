@@ -119,4 +119,62 @@ class MakerHedgeEngine {
     TradeJournal* journal_ {nullptr};
 };
 
+class LighterMakerTakerEngine {
+  public:
+    LighterMakerTakerEngine(
+        EngineConfig config,
+        HyperliquidExchange& hl,
+        LighterExchange& lighter,
+        TradeJournal* journal = nullptr
+    );
+
+    [[nodiscard]] SpreadSnapshot collect_snapshot() const;
+    [[nodiscard]] std::vector<EventLog> on_market_data(std::int64_t now_ms);
+    [[nodiscard]] std::vector<EventLog> on_lighter_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, std::int64_t order_index, std::int64_t client_order_index, std::uint64_t fill_rx_ns);
+    [[nodiscard]] std::vector<EventLog> on_hl_hedge_reject();
+
+    [[nodiscard]] const std::optional<std::int64_t>& active_lighter_order_index() const noexcept;
+    [[nodiscard]] const LighterMakerHlHedger& strategy() const noexcept;
+    [[nodiscard]] std::optional<std::int64_t> next_retry_steady_ms() const noexcept;
+
+  private:
+    struct OrderPerfTrace {
+        std::int64_t client_order_index {0};
+        std::int64_t order_index {0};
+        std::uint64_t signal_ns {0};
+        std::uint64_t lighter_send_ns {0};
+        std::uint64_t lighter_ack_ns {0};
+        std::uint64_t fill_rx_ns {0};
+        std::uint64_t hl_send_ns {0};
+        std::uint64_t hl_ack_ns {0};
+        std::uint64_t cancel_trigger_ns {0};
+        std::uint64_t cancel_send_ns {0};
+    };
+
+    struct DeferredLighterAction {
+        Action action;
+    };
+
+    [[nodiscard]] std::vector<EventLog> execute_action(const Action& action, const SpreadSnapshot& snapshot);
+    [[nodiscard]] std::vector<EventLog> execute_deferred_lighter_action(std::int64_t now_ms, const SpreadSnapshot& snapshot);
+    [[nodiscard]] std::optional<std::int64_t> lighter_place_retry_at_ms(std::int64_t now_ms) const noexcept;
+    [[nodiscard]] std::optional<std::int64_t> lighter_cancel_retry_at_ms(std::int64_t now_ms) const noexcept;
+    [[nodiscard]] std::int64_t steady_now_ms() const noexcept;
+
+    EngineConfig config_;
+    HyperliquidExchange& hl_;
+    LighterExchange& lighter_;
+    LighterMakerHlHedger strategy_;
+    TradeJournal* journal_ {nullptr};
+    std::optional<std::int64_t> active_lighter_order_index_;
+    std::optional<std::int64_t> active_lighter_client_order_index_;
+    Direction last_maker_direction_ {Direction::ShortLighterLongHl};
+    double lighter_position_base_ {0.0};
+    OrderPerfTrace perf_trace_;
+    std::int64_t last_lighter_place_ms_ {0};
+    std::int64_t last_lighter_cancel_ms_ {0};
+    std::optional<DeferredLighterAction> deferred_lighter_action_;
+    std::optional<std::int64_t> next_retry_steady_ms_;
+};
+
 }  // namespace arb

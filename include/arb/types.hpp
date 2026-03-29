@@ -16,8 +16,12 @@ enum class StrategyState {
     PendingHlMaker,
     CancelledPendingConfirm,  // Cancel sent but fill may still arrive; pending_maker_ retained.
     HlFilledPendingLighterHedge,
+    PendingLighterMaker,
+    CancelledPendingLighterConfirm,
+    LighterFilledPendingHlHedge,
     Open,
     UnwindingHl,
+    UnwindingLighter,
     Error,
 };
 
@@ -93,12 +97,22 @@ struct HedgeIntent {
     double size_base {0.0};
 };
 
+struct HlHedgeIntent {
+    bool is_buy {true};
+    double limit_price {0.0};
+    double size_base {0.0};
+};
+
 enum class ActionType {
     None,
     PlaceHlMaker,
     CancelHlMaker,
+    PlaceLighterMaker,
+    CancelLighterMaker,
     SendLighterTakerHedge,
+    SendHlTakerHedge,
     UnwindHlPosition,
+    UnwindLighterPosition,
 };
 
 struct Action {
@@ -106,6 +120,7 @@ struct Action {
     std::string reason;
     std::optional<PendingMakerOrder> maker_order;
     std::optional<HedgeIntent> hedge_intent;
+    std::optional<HlHedgeIntent> hl_hedge_intent;
 };
 
 }  // namespace arb

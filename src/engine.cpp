@@ -680,6 +680,11 @@ std::vector<EventLog> MakerHedgeEngine::execute_action(const Action& action, con
             events.push_back(EventLog {.message = ack.ok ? "unwound naked hl position" : "hl unwind failed: " + ack.message});
             return events;
         }
+        case ActionType::PlaceLighterMaker:
+        case ActionType::CancelLighterMaker:
+        case ActionType::SendHlTakerHedge:
+        case ActionType::UnwindLighterPosition:
+            return events;
     }
 
     return events;
@@ -834,6 +839,314 @@ std::vector<EventLog> MakerHedgeEngine::on_trade_event(const TradeEvent& trade) 
 
     events.push_back(EventLog{.message = msg.str()});
     return events;
+}
+
+LighterMakerTakerEngine::LighterMakerTakerEngine(
+    EngineConfig config,
+    HyperliquidExchange& hl,
+    LighterExchange& lighter,
+    TradeJournal* journal
+) : config_(std::move(config)),
+    hl_(hl),
+    lighter_(lighter),
+    strategy_(config_.strategy),
+    journal_(journal) {}
+
+SpreadSnapshot LighterMakerTakerEngine::collect_snapshot() const {
+    const Bbo hl_bbo = hl_.get_bbo(config_.hl_coin);
+    const Bbo lighter_bbo = lighter_.get_bbo(config_.lighter_market_id);
+    const double hl_mid = hl_bbo.mid();
+    const double lighter_mid = lighter_bbo.mid();
+    const double avg_mid = (hl_mid + lighter_mid) / 2.0;
+    const double spread = avg_mid > 0.0 ? ((lighter_mid - hl_mid) / avg_mid) * 10000.0 : 0.0;
+    return SpreadSnapshot {
+        .lighter = lighter_bbo,
+        .hl = hl_bbo,
+        .cross_spread_bps = spread,
+    };
+}
+
+std::int64_t LighterMakerTakerEngine::steady_now_ms() const noexcept {
+    return static_cast<std::int64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count()
+    );
+}
+
+std::vector<EventLog> LighterMakerTakerEngine::on_market_data(std::int64_t now_ms) {
+    const SpreadSnapshot snapshot = collect_snapshot();
+    if (deferred_lighter_action_.has_value()) {
+        auto deferred_logs = execute_deferred_lighter_action(now_ms, snapshot);
+        if (!deferred_logs.empty()) {
+            return deferred_logs;
+        }
+    }
+
+    PerfCollector::instance().record_hot_path(
+        PerfMetric::CrossVenueAlignmentMs,
+        static_cast<std::uint64_t>(std::llabs(snapshot.hl.quote_age_ms - snapshot.lighter.quote_age_ms))
+    );
+
+    const std::uint64_t decision_start_ns = perf_now_ns();
+    const Action action = strategy_.on_market_snapshot(snapshot, now_ms);
+    const std::uint64_t decision_end_ns = perf_now_ns();
+    PerfCollector::instance().record_hot_path(
+        PerfMetric::StrategyDecisionNs,
+        decision_end_ns - decision_start_ns
+    );
+
+    if (action.type == ActionType::PlaceLighterMaker) {
+        perf_trace_ = {};
+        perf_trace_.signal_ns = decision_end_ns;
+    } else if (action.type == ActionType::CancelLighterMaker) {
+        perf_trace_.cancel_trigger_ns = decision_end_ns;
+    }
+    return execute_action(action, snapshot);
+}
+
+std::vector<EventLog> LighterMakerTakerEngine::on_lighter_fill(double fill_price, double fill_size_base, const SpreadSnapshot& snapshot, std::int64_t order_index, std::int64_t client_order_index, std::uint64_t fill_rx_ns) {
+    if (!active_lighter_order_index_.has_value() || *active_lighter_order_index_ != order_index) {
+        return {};
+    }
+    perf_trace_.fill_rx_ns = fill_rx_ns;
+    if (perf_trace_.lighter_ack_ns > 0 && fill_rx_ns >= perf_trace_.lighter_ack_ns) {
+        const std::uint64_t resting_ns = fill_rx_ns - perf_trace_.lighter_ack_ns;
+        PerfCollector::instance().record_trade_path(PerfMetric::HlMakerRestingLifetimeNs, resting_ns);
+    }
+    const Action action = strategy_.on_lighter_maker_fill(fill_price, fill_size_base, snapshot);
+    return execute_action(action, snapshot);
+}
+
+std::vector<EventLog> LighterMakerTakerEngine::on_hl_hedge_reject() {
+    const Action action = strategy_.on_hl_hedge_reject();
+    return execute_action(action, collect_snapshot());
+}
+
+const std::optional<std::int64_t>& LighterMakerTakerEngine::active_lighter_order_index() const noexcept {
+    return active_lighter_order_index_;
+}
+
+const LighterMakerHlHedger& LighterMakerTakerEngine::strategy() const noexcept {
+    return strategy_;
+}
+
+std::optional<std::int64_t> LighterMakerTakerEngine::next_retry_steady_ms() const noexcept {
+    return next_retry_steady_ms_;
+}
+
+std::vector<EventLog> LighterMakerTakerEngine::execute_action(const Action& action, const SpreadSnapshot& snapshot) {
+    std::vector<EventLog> events;
+    switch (action.type) {
+        case ActionType::None:
+            return events;
+        case ActionType::PlaceLighterMaker: {
+            const auto now = steady_now_ms();
+            if (const auto retry_at = lighter_place_retry_at_ms(now); retry_at.has_value()) {
+                deferred_lighter_action_ = DeferredLighterAction {.action = action};
+                next_retry_steady_ms_ = retry_at;
+                return events;
+            }
+            last_lighter_place_ms_ = now;
+            next_retry_steady_ms_.reset();
+            deferred_lighter_action_.reset();
+
+            const std::uint64_t send_ns = perf_now_ns();
+            perf_trace_.lighter_send_ns = send_ns;
+            const LighterLimitOrderAck ack = lighter_.place_limit_order(LighterLimitOrderRequest {
+                .is_ask = !action.maker_order->is_buy,
+                .price = action.maker_order->price,
+                .size = action.maker_order->size_base,
+                .post_only = true,
+                .dry_run = config_.dry_run,
+            });
+            const std::uint64_t ack_ns = perf_now_ns();
+            perf_trace_.lighter_ack_ns = ack_ns;
+            if (ack.ok && ack.resting_confirmed) {
+                active_lighter_order_index_ = ack.order_index;
+                active_lighter_client_order_index_ = ack.client_order_index;
+                perf_trace_.order_index = ack.order_index;
+                perf_trace_.client_order_index = ack.client_order_index;
+                last_maker_direction_ = action.maker_order->direction;
+                events.push_back(EventLog {.message = "placed lighter maker order_index=" + std::to_string(ack.order_index)});
+            } else {
+                events.push_back(EventLog {.message = "lighter maker placement failed: " + ack.message});
+            }
+            return events;
+        }
+        case ActionType::CancelLighterMaker: {
+            const auto now = steady_now_ms();
+            if (const auto retry_at = lighter_cancel_retry_at_ms(now); retry_at.has_value()) {
+                deferred_lighter_action_ = DeferredLighterAction {.action = action};
+                next_retry_steady_ms_ = retry_at;
+                return events;
+            }
+            last_lighter_cancel_ms_ = now;
+            next_retry_steady_ms_.reset();
+            deferred_lighter_action_.reset();
+            if (!active_lighter_order_index_.has_value()) {
+                events.push_back(EventLog {.message = "cancel requested with no active lighter order"});
+                return events;
+            }
+            const std::uint64_t send_ns = perf_now_ns();
+            const auto ack = lighter_.cancel_order(*active_lighter_order_index_, config_.dry_run);
+            const std::uint64_t ack_ns = perf_now_ns();
+            std::ostringstream msg;
+            msg << (ack.ok ? "cancelled lighter maker order_index=" : "lighter cancel failed: ")
+                << (ack.ok ? std::to_string(ack.order_index) : ack.message);
+            events.push_back(EventLog {.message = msg.str()});
+            std::ostringstream perf;
+            perf << "perf cancel execution_policy=lt_maker_hl_taker order_index=" << *active_lighter_order_index_
+                 << " cancel_trigger_to_send_ms=" << ((send_ns > perf_trace_.cancel_trigger_ns)
+                        ? static_cast<double>(send_ns - perf_trace_.cancel_trigger_ns) / 1000000.0 : 0.0)
+                 << " cancel_send_to_ack_ms=" << static_cast<double>(ack_ns - send_ns) / 1000000.0
+                 << " lt_resting_ms=" << ((send_ns > perf_trace_.lighter_ack_ns)
+                        ? static_cast<double>(send_ns - perf_trace_.lighter_ack_ns) / 1000000.0 : 0.0);
+            events.push_back(EventLog {.message = perf.str()});
+            if (ack.ok) {
+                active_lighter_order_index_.reset();
+                active_lighter_client_order_index_.reset();
+                strategy_.reset();
+                perf_trace_ = {};
+            }
+            return events;
+        }
+        case ActionType::SendHlTakerHedge: {
+            const std::uint64_t hl_send_ns = perf_now_ns();
+            perf_trace_.hl_send_ns = hl_send_ns;
+            const auto ack = hl_.place_ioc_order(HlIocOrderRequest {
+                .coin = config_.hl_coin,
+                .is_buy = action.hl_hedge_intent->is_buy,
+                .price = action.hl_hedge_intent->limit_price,
+                .size = action.hl_hedge_intent->size_base,
+                .dry_run = config_.dry_run,
+            });
+            const std::uint64_t hl_ack_ns = perf_now_ns();
+            perf_trace_.hl_ack_ns = hl_ack_ns;
+            std::ostringstream msg;
+            std::ostringstream perf;
+            if (ack.ok && ack.filled_size > 0.0) {
+                strategy_.on_hl_hedge_fill(ack.avg_fill_price);
+                const auto& pos = strategy_.open_position();
+                msg << "TRADE COMPLETE: execution_policy=lt_maker_hl_taker"
+                    << " lt_px=" << (pos ? pos->lighter_fill_price : 0.0)
+                    << " sz=" << (pos ? pos->size_base : action.hl_hedge_intent->size_base)
+                    << " hl_fill_px=" << ack.avg_fill_price
+                    << " hl_sz=" << ack.filled_size
+                    << " spread=" << snapshot.cross_spread_bps;
+                perf << "perf trade execution_policy=lt_maker_hl_taker order_index=" << (active_lighter_order_index_.has_value() ? std::to_string(*active_lighter_order_index_) : "0")
+                     << " lt_send_to_ack_ms=" << ((perf_trace_.lighter_ack_ns > perf_trace_.lighter_send_ns) ? static_cast<double>(perf_trace_.lighter_ack_ns - perf_trace_.lighter_send_ns) / 1000000.0 : 0.0)
+                     << " lt_resting_ms=" << ((perf_trace_.fill_rx_ns > perf_trace_.lighter_ack_ns) ? static_cast<double>(perf_trace_.fill_rx_ns - perf_trace_.lighter_ack_ns) / 1000000.0 : 0.0)
+                     << " lt_fill_rx_to_hl_send_ms=" << static_cast<double>(hl_send_ns - perf_trace_.fill_rx_ns) / 1000000.0
+                     << " hl_send_to_ack_ms=" << static_cast<double>(hl_ack_ns - hl_send_ns) / 1000000.0
+                     << " hedge_total_ms=" << static_cast<double>(hl_ack_ns - perf_trace_.fill_rx_ns) / 1000000.0;
+                if (journal_) {
+                    const bool hl_is_buy = action.hl_hedge_intent->is_buy;
+                    journal_->record(JournalEntry {
+                        .trade_id = now_us(),
+                        .timestamp_us = now_us(),
+                        .type = 'T',
+                        .hedge_status = "filled",
+                        .hl_fill_timestamp_us = static_cast<std::int64_t>(hl_ack_ns / 1000),
+                        .lighter_fill_timestamp_us = static_cast<std::int64_t>(perf_trace_.fill_rx_ns / 1000),
+                        .hl_side = hl_is_buy ? 'B' : 'S',
+                        .hl_px = ack.avg_fill_price,
+                        .hl_sz = ack.filled_size,
+                        .hl_fee = 0.0,
+                        .lt_fill_px = pos ? pos->lighter_fill_price : 0.0,
+                        .lt_sz = pos ? pos->size_base : action.hl_hedge_intent->size_base,
+                        .lt_fee = 0.0,
+                        .spread_bps = snapshot.cross_spread_bps,
+                        .maker_resting_ms = ((perf_trace_.fill_rx_ns > perf_trace_.lighter_ack_ns) ? static_cast<double>(perf_trace_.fill_rx_ns - perf_trace_.lighter_ack_ns) / 1000000.0 : 0.0),
+                        .hedge_total_ms = static_cast<double>(hl_ack_ns - perf_trace_.fill_rx_ns) / 1000000.0,
+                        .hl_oid = "hl_ioc",
+                        .lt_tx = std::to_string(active_lighter_order_index_.value_or(0)),
+                    });
+                }
+                active_lighter_order_index_.reset();
+                active_lighter_client_order_index_.reset();
+                strategy_.reset();
+                perf_trace_ = {};
+            } else {
+                msg << "HL taker hedge failed for lighter maker fill: " << ack.message << " — UNWINDING LIGHTER POSITION";
+                events.push_back(EventLog {.message = msg.str()});
+                const bool unwind_is_ask = (last_maker_direction_ == Direction::LongLighterShortHl);
+                const double lighter_mid = snapshot.lighter.mid();
+                constexpr double kSlippageBps = 15.0;
+                const double unwind_price = unwind_is_ask
+                    ? lighter_mid * (1.0 - kSlippageBps / 10000.0)
+                    : lighter_mid * (1.0 + kSlippageBps / 10000.0);
+                const auto unwind_ack = lighter_.place_ioc_order(LighterIocRequest {
+                    .is_ask = unwind_is_ask,
+                    .price = unwind_price,
+                    .size = action.hl_hedge_intent->size_base,
+                    .signal_price = lighter_mid,
+                    .dry_run = config_.dry_run,
+                });
+                std::ostringstream unwind_msg;
+                unwind_msg << "LIGHTER UNWIND " << (unwind_ack.ok ? "OK" : "FAILED") << " tx=" << unwind_ack.tx_hash;
+                events.push_back(EventLog {.message = unwind_msg.str()});
+                active_lighter_order_index_.reset();
+                active_lighter_client_order_index_.reset();
+                strategy_.reset();
+                perf_trace_ = {};
+                return events;
+            }
+            events.push_back(EventLog {.message = msg.str()});
+            events.push_back(EventLog {.message = perf.str()});
+            return events;
+        }
+        case ActionType::UnwindLighterPosition: {
+            const auto* open = strategy_.open_position().has_value() ? &*strategy_.open_position() : nullptr;
+            const bool is_ask = open != nullptr && open->direction == Direction::LongLighterShortHl;
+            const double size = open != nullptr ? open->size_base : 0.0;
+            const double lighter_mid = snapshot.lighter.mid();
+            constexpr double kSlippageBps = 15.0;
+            const double unwind_price = is_ask
+                ? lighter_mid * (1.0 - kSlippageBps / 10000.0)
+                : lighter_mid * (1.0 + kSlippageBps / 10000.0);
+            const auto ack = lighter_.place_ioc_order(LighterIocRequest {
+                .is_ask = is_ask,
+                .price = unwind_price,
+                .size = size,
+                .signal_price = lighter_mid,
+                .dry_run = config_.dry_run,
+            });
+            events.push_back(EventLog {.message = ack.ok ? "unwound naked lighter position" : "lighter unwind failed: " + ack.message});
+            return events;
+        }
+        default:
+            return events;
+    }
+}
+
+std::vector<EventLog> LighterMakerTakerEngine::execute_deferred_lighter_action(std::int64_t now_ms, const SpreadSnapshot& snapshot) {
+    if (!deferred_lighter_action_.has_value()) {
+        return {};
+    }
+    if (next_retry_steady_ms_.has_value() && now_ms < *next_retry_steady_ms_) {
+        return {};
+    }
+    const Action action = deferred_lighter_action_->action;
+    deferred_lighter_action_.reset();
+    next_retry_steady_ms_.reset();
+    return execute_action(action, snapshot);
+}
+
+std::optional<std::int64_t> LighterMakerTakerEngine::lighter_place_retry_at_ms(std::int64_t now_ms) const noexcept {
+    const std::int64_t elapsed = now_ms - last_lighter_place_ms_;
+    if (elapsed >= config_.lighter_order_interval_ms) {
+        return std::nullopt;
+    }
+    return last_lighter_place_ms_ + config_.lighter_order_interval_ms;
+}
+
+std::optional<std::int64_t> LighterMakerTakerEngine::lighter_cancel_retry_at_ms(std::int64_t now_ms) const noexcept {
+    const std::int64_t elapsed = now_ms - last_lighter_cancel_ms_;
+    if (elapsed >= config_.lighter_order_interval_ms) {
+        return std::nullopt;
+    }
+    return last_lighter_cancel_ms_ + config_.lighter_order_interval_ms;
 }
 
 }  // namespace arb
