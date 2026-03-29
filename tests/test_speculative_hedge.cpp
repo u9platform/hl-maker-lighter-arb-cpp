@@ -46,7 +46,7 @@ struct FakeLighterExchange final : arb::LighterExchange {
     arb::Bbo bbo {.bid = 10.03, .ask = 10.05, .quote_age_ms = 1};
     arb::LighterLimitOrderAck limit_ack {.ok = true, .message = "", .tx_hash = "ltx-1", .client_order_index = 1001};
     arb::LighterCancelAck cancel_ack {.ok = true, .message = "", .tx_hash = "ctx-1", .order_index = 1001};
-    arb::LighterIocAck ioc_ack {.ok = true, .message = "", .tx_hash = "tx-1", .fill_confirmed = true, .confirmed_size = 2.5, .fill_price = 10.04};
+    arb::LighterIocAck ioc_ack {.ok = true, .fill_confirmed = true, .message = "", .tx_hash = "tx-1", .confirmed_size = 2.5, .fill_price = 10.04};
     int limit_count {0};
     int cancel_count {0};
     int ioc_count {0};

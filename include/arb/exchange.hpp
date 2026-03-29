@@ -102,9 +102,11 @@ struct LighterLimitOrderRequest {
 
 struct LighterLimitOrderAck {
     bool ok {false};
+    bool resting_confirmed {false};
     std::string message;
     std::string tx_hash;
     std::int64_t client_order_index {0};
+    std::int64_t order_index {0};
     double nonce_fetch_latency_ms {0.0};
     double sign_order_latency_ms {0.0};
     double send_tx_ack_latency_ms {0.0};
