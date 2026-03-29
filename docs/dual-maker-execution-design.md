@@ -152,6 +152,40 @@ MakerSignal {
 5. `active_entry_count`
 - 当前活跃 entry engine 数
 
+### Coordinator 的最小事实状态
+
+仅靠聚合 notional 不足以正确处理：
+
+- 对侧挂单撤单中
+- fill / cancel race
+- 双边同时成交
+- 部分成交后的净额对冲
+
+因此协调层必须维护每侧逐笔事实状态。建议最小结构如下：
+
+```text
+PerEngineExecutionState {
+  engine_id: hl_maker_lt_taker | lt_maker_hl_taker
+  active_maker_oid: optional<string>
+  cancel_pending_oid: optional<string>
+  maker_working: bool
+  maker_remaining_size: double
+  maker_filled_size: double
+  hedge_sent_size: double
+  hedge_confirmed_size: double
+  remaining_unhedged_size: double
+  last_fill_ts_ms: int64
+  last_cancel_ts_ms: int64
+  last_error: optional<string>
+}
+```
+
+Coordinator 的 source of truth 应该来自这两个 `PerEngineExecutionState`，再由其派生：
+
+- `pending_maker_notional_usd`
+- `unhedged_fill_notional_usd`
+- `active_entry_count`
+
 ### Coordinator 的硬约束
 
 第一版建议直接上硬规则：
@@ -222,6 +256,39 @@ EntryEngineState
 
 4. 任一侧进入 `Error` 或裸腿超限
 - 全局进入 `KillSwitch`
+
+## 唯一执行优先级
+
+当任一侧 maker 先成交，而对侧挂单尚未撤净时，第一版必须采用唯一执行优先级，避免不同实现做出不同决策。
+
+### 硬规则
+
+1. 任一侧 fill 一到，当前侧 `taker hedge` 立即发送
+2. 对侧已有挂单，立即发送 cancel
+3. 不等待对侧 cancel ack 再决定是否 hedge
+4. 对侧若在 cancel 期间成交，统一进入 reconciliation
+5. reconciliation 基于两侧实际 filled / hedged 结果计算净暴露
+
+### 原因
+
+- 等待对侧 cancel 结果会显著拉长裸腿时间
+- 双边同时成交属于低概率但必须由 reconciler 收尾的场景
+- 执行优先级必须稳定，不能由各实现自行选择“先 hedge”还是“先等 cancel”
+
+### 推荐执行顺序
+
+```text
+1. maker fill detected
+2. freeze other side new maker placements
+3. send current side taker hedge immediately
+4. send cancel for opposite active maker
+5. wait for:
+   - hedge result
+   - opposite side cancel ack
+   - opposite side late fill if any
+6. run reconciliation
+7. if residual exposure != 0, send correction / unwind
+```
 
 ## 双边同时成交的处理原则
 
@@ -361,9 +428,28 @@ EntryEngineState
 
 1. 先保留现有 `HL maker -> LT taker`
 2. 引入第二条 `LT maker -> HL taker`，但先只做 dry-run telemetry
-3. 验证第二条路径的 maker fill、cancel、taker hedge 指标
-4. 再开启双边同时真实挂单
-5. 最后再考虑更激进的自然配对优化
+3. 开启中间阶段：
+   - 新路径真实 maker/cancel，hedge 仅 shadow
+   - 或新路径 shadow maker，但对 hedge/reconcile 做真实模拟
+4. 验证第二条路径的 maker fill、cancel、hedge 时序、reconcile 结果
+5. 再开启双边同时真实挂单
+6. 最后再考虑更激进的自然配对优化
+
+### 为什么需要中间阶段
+
+双 maker 系统的主要风险不只在挂单本身，还在：
+
+- fill 回调顺序
+- cancel race
+- 双边同时成交
+- reconciliation 的净额计算
+
+因此从 dry-run 直接跳到双边同时实盘风险过高。中间阶段可以帮助隔离：
+
+- maker 逻辑是否正确
+- cancel 逻辑是否稳定
+- reconcile 逻辑是否正确
+- shadow hedge 结果是否和预期一致
 
 ## 最终建议
 
@@ -381,4 +467,3 @@ EntryEngineState
 
 - 允许机会同时出现
 - 但风险不能分裂管理
-
