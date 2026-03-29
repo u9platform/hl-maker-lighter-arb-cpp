@@ -160,7 +160,9 @@ int main() {
               << " spread=" << spread_bps << " close_spread=" << (close_spread_bps > 0.0 ? close_spread_bps : spread_bps) << " cancel_band=" << cancel_band
               << " pair_size=" << pair_size << " max_pos=" << max_pos
               << " hl_interval=" << env_or("HL_ORDER_INTERVAL_MS", "200") << "ms"
-              << " lt_interval=" << env_or("LIGHTER_ORDER_INTERVAL_MS", "500") << "ms\n";
+              << " lt_interval=" << env_or("LIGHTER_ORDER_INTERVAL_MS", "500") << "ms"
+              << " spec_min_cross=" << env_or("SPEC_HEDGE_MIN_CROSS_BPS", "1.0") << "bps"
+              << " spec_min_ratio=" << env_or("SPEC_HEDGE_MIN_TRADE_RATIO", "0.5") << "\n";
 
     // --- Market Feed (WS for BBO reads) ---
     arb::MarketFeed::Config feed_config;
@@ -246,6 +248,10 @@ int main() {
         std::stod(env_or("HL_ORDER_INTERVAL_MS", "200")));
     engine_config.lighter_order_interval_ms = static_cast<std::int64_t>(
         std::stod(env_or("LIGHTER_ORDER_INTERVAL_MS", "500")));
+    engine_config.spec_hedge_min_cross_bps =
+        std::stod(env_or("SPEC_HEDGE_MIN_CROSS_BPS", "1.0"));
+    engine_config.spec_hedge_min_trade_ratio =
+        std::stod(env_or("SPEC_HEDGE_MIN_TRADE_RATIO", "0.5"));
 
     // --- Trade Journal (append-only CSV, flushed with telemetry) ---
     const std::string journal_path = env_or("JOURNAL_PATH", "/home/ubuntu/lighter-hl-arb-cpp/trades.csv");

@@ -20,6 +20,10 @@ struct EngineConfig {
     bool dry_run {true};
     std::int64_t hl_order_interval_ms {200};     // Min ms between HL place/cancel API calls
     std::int64_t lighter_order_interval_ms {500}; // Min ms between Lighter hedge API calls
+
+    // Speculative hedge filters (reduce false triggers)
+    double spec_hedge_min_cross_bps {1.0};  // Min price depth past maker order to trigger (0 = any cross)
+    double spec_hedge_min_trade_ratio {0.5}; // Min trade.size / order.size ratio to trigger (0 = any size)
 };
 
 struct EventLog {

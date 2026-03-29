@@ -733,12 +733,28 @@ std::vector<EventLog> MakerHedgeEngine::on_trade_event(const TradeEvent& trade) 
     const double maker_price = strategy_pending->price;
     const bool maker_is_buy = strategy_pending->is_buy;
 
-    // Check if trade price crosses our maker order price
+    // Check if trade price crosses our maker order price with minimum depth
+    const double min_cross_bps = config_.spec_hedge_min_cross_bps;
     bool price_crossed = false;
-    if (maker_is_buy && trade_price <= maker_price) {
-        price_crossed = true; // Trade at or below our buy order
-    } else if (!maker_is_buy && trade_price >= maker_price) {
-        price_crossed = true; // Trade at or above our sell order
+    if (maker_is_buy) {
+        const double threshold = maker_price * (1.0 - min_cross_bps / 10000.0);
+        if (trade_price <= threshold) {
+            price_crossed = true; // Trade sufficiently below our buy order
+        }
+    } else {
+        const double threshold = maker_price * (1.0 + min_cross_bps / 10000.0);
+        if (trade_price >= threshold) {
+            price_crossed = true; // Trade sufficiently above our sell order
+        }
+    }
+
+    // Filter by trade size relative to our order size
+    const double min_ratio = config_.spec_hedge_min_trade_ratio;
+    if (price_crossed && min_ratio > 0.0) {
+        const double order_size = strategy_pending->size_base;
+        if (order_size > 0.0 && trade.size / order_size < min_ratio) {
+            price_crossed = false; // Trade too small, likely not our fill
+        }
     }
 
     if (!price_crossed) {
